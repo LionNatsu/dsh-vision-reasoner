@@ -206,6 +206,17 @@ test('the surface is four verbs, and marking cannot skip the look', () => {
   assert.match(harness.tools.get('vision_look').description, /nothing can be marked on a view you have not been shown/)
 })
 
+test('the client half claims a row for every tool', () => {
+  // A tool with no row still answers, but its picture never reaches the reader,
+  // and nothing else in this suite would notice: renaming the Host half once left
+  // three tools showing text alone.
+  const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+  const listed = /const TOOL_NAMES = \[([^\]]+)\]/.exec(source)
+  assert.ok(listed, 'the client half lists the tool names it claims')
+  const names = listed[1].split(',').map((name) => name.trim().replace(/^'|'$/g, '')).filter(Boolean)
+  assert.deepEqual(names.slice().sort(), [...fakeHarness().tools.keys()].sort())
+})
+
 test('every tool value satisfies its own declared output schema', async (t) => {
   const { imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
