@@ -12,7 +12,8 @@ similar regions a note meant is another.
 | Tool | Purpose |
 |---|---|
 | `vision_mark` | Add numbered marks. One call takes a whole round of them. |
-| `vision_update` | Move, recaption, recolour or delete marks by number — `17=yellow`, `21 "half hidden"`, `16 removed` in one call. |
+| `vision_unmark` | Delete marks by number, e.g. `[3, 7]`, when a mark is in the wrong place. |
+| `vision_update` | Move, recaption, recolour or delete marks by number — `17=yellow`, `21 "half hidden"` in one call. Comes back with the whole frame redrawn, like every call that changes the record. |
 | `vision_show` | Look: the whole frame with a ruler, a close-up of one address, several addresses as one sheet, or a `cover` that paints given colours out. |
 | `vision_list` | Read the record back as text. |
 
@@ -68,6 +69,11 @@ withholding a picture over a failed lookup costs more than it protects.
 - Labels are original-image coordinates or mark numbers, never fractions of the
   rendered image. A map gets a ruler whose tick line is the coordinate; a close-up
   gets a coordinate grid.
+- Every call that changes the record returns the whole frame, so the picture arrives
+  with the change and `vision_show` is for looking again, not for looking at all.
+- Ticks, grid lines and rings are drawn 2-3 pixels wide at minimum and scale with the
+  zoom. A one-pixel guide line is gone by the time the attachment pipeline has
+  re-encoded the picture, and an invisible guide is worse than none.
 - A close-up draws a magenta crosshair on the address it was asked for, captioned
   with its coordinates, so one position on the tile needs no reading at all.
 - Every mark's number is drawn on the picture in its own colour.

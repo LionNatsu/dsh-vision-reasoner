@@ -4,7 +4,7 @@
 
 | Path | Role |
 |---|---|
-| `index.js` | Host half: registers the four tools, folds each record from the session log, stores the rendered views |
+| `index.js` | Host half: registers the five tools, folds each record from the session log, stores the rendered views |
 | `lib/record.js` | The mark record, and the only two functions that change it — both pure |
 | `lib/core.js` | One call: validate, change the record, decide which views to render |
 | `lib/draw.js` | The views, as SVG strings (pure) |
@@ -32,6 +32,8 @@ rounds its two dimensions independently:
 - A close-up draws a crosshair on the address it was asked for, so one position on
   the tile needs no reading.
 - `MAX_VIEW_DIMENSION` caps every view, sheets included, whatever the caller asks.
+- Line widths have a floor of 2-3 view pixels and scale with the zoom: the
+  attachment pipeline re-encodes a view, and hairlines do not survive it.
 - Coordinates are integers in original pixels. Colour names come from a fixed
   palette; what they mean is the caller's business.
 - `applyMarkArgs` and `applyUpdateArgs` throw on bad input rather than repairing
@@ -90,13 +92,14 @@ the marks are committed by then.
 
 | Tool | Behaviour |
 |---|---|
-| `vision_mark` | Adds marks, numbered in the order given. `view`: `map` (default) / `marks` / `none` |
-| `vision_update` | Moves, recaptions, recolours or removes marks by number; one call takes many operations |
+| `vision_mark` | Adds marks, numbered in the order given. `view`: `map` (default) / `marks` |
+| `vision_unmark` | Deletes marks by number, through the same removal operation as `vision_update` |
+| `vision_update` | Moves, recaptions, recolours or removes marks by number; one call takes many operations. `view` defaults to `map` |
 | `vision_show` | No address: the map. One: a close-up. Several: a sheet. `cover` paints given colours out |
 | `vision_list` | The record as text, one line per mark |
 
-`vision_mark` and `vision_update` leave `isConcurrencySafe` undeclared, so the
-registry schedules them exclusively: two calls editing one record must not
+`vision_mark`, `vision_unmark` and `vision_update` leave `isConcurrencySafe`
+undeclared, so the registry schedules them exclusively: two calls editing one record must not
 interleave, or two marks would be handed the same number.
 
 ## Reading the picture
