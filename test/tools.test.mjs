@@ -202,9 +202,13 @@ test('the surface is four verbs, and a place is named in the picture\'s own pixe
   assert.match(mark.description, /LOOK FIRST/)
 
   const look = harness.tools.get('vision_look')
-  assert.match(look.description, /ORIGINAL image pixels/)
   assert.match(look.description, /nothing is scaled/, 'a caller never converts a scale')
+  assert.match(look.description, /no scale to work out/, 'and is told how to read a position')
   assert.match(look.description, /only ruler/, 'and does not read positions off another view')
+  assert.match(look.parameters.properties.region.description, /original image pixels/)
+  assert.match(look.parameters.properties.marks.description, /Marks stay from call to call/,
+    'the picture carries the record, and a look can draw it')
+  assert.match(mark.description, /STAYS on the picture/, 'a mark is durable, not a report')
   assert.equal(look.parameters.required.includes('view'), false)
 
   const edit = harness.tools.get('vision_edit')

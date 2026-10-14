@@ -154,6 +154,9 @@ test('a look the caller did not ask to be marked comes back clean', async () => 
   assert.equal(clean.result.marks, 1, 'the record comes back even when the marks do not')
   assert.match(describeResult(clean.result), /1 mark is not drawn here — `marks: true` draws them at this scale/,
     'a caller that never sees its own record drawn is told it can')
+  assert.match(describeResult({ ...clean.result, marks: 0, record: [] }),
+    /nothing marked yet — mark a place as you decide it/,
+    'and before anything is marked it is told how marking works')
   const drawn = await planLook({ record, args: { image: 'a.png', marks: true }, loadSource: loadSource(src) })
   assert.equal(drawn.result.marksShown, true)
   assert.equal(drawn.views[0].kind, 'frame')

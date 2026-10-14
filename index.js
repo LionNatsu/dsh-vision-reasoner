@@ -408,16 +408,17 @@ export function apply(ctx) {
   ctx.tools.register({
     name: 'vision_look',
     description:
-      'Look at the picture: all of it, or a rectangle of it. Every grid line is labelled with its position ' +
-      'in ORIGINAL image pixels — the picture\'s top-left corner is 0,0 — so a number you read is a number ' +
-      'you can use: nothing is scaled, and nothing has to be converted. Start here; a place is named from ' +
-      'what you have seen. `region` is [x0, y0, x1, y1] read off those labels: leave it out for the whole ' +
-      'picture, give a small one to read a face closely, or give `regions` — several rectangles at once — ' +
-      'to sweep a picture in a few calls. This grid is the only ruler — do not crop the ' +
-      'picture with another tool, and do not read a position off another view of it, whose pixels are a ' +
-      'different size. The picture is drawn without your marks unless you ask for `marks: true`; `compare` ' +
-      'puts marks side by side to ask "is this one thing or two"; `cover` paints a colour out, so whatever ' +
-      'still shows has not been marked.',
+      'See the picture, or a part of it, with a grid of the picture\'s own pixel coordinates drawn on ' +
+      'it and every line labelled: a number you read is a number you can use, and nothing is scaled. ' +
+      'Start here — a place is named from what you have seen. `region` is [x0, y0, x1, y1] read off ' +
+      'those labels: leave it out for the whole picture, give a small one to read a face closely, or ' +
+      'give `regions` — several rectangles at once — to sweep a picture in a few calls. Read a ' +
+      'position by naming the line beside it and judging the gap by eye — there is no scale to work ' +
+      'out — and treat this grid as the only ruler: do not crop the picture with another tool, or read ' +
+      'a position off another view of it, whose pixels are a different size. The picture is drawn ' +
+      'without your marks unless you ask for `marks: true`; `compare` puts marks side by side to ask "is ' +
+      'this one thing or two"; `cover` paints a colour out, so whatever still shows has not been ' +
+      'marked.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -429,16 +430,14 @@ export function apply(ctx) {
           type: 'array',
           items: { type: 'array', items: { type: 'integer' } },
           description: 'Several rectangles in one call, e.g. [[0, 0, 900, 450], [900, 0, 1800, 450]], at ' +
-            `most ${MAX_SHEET_TILES}: they come back as one sheet of tiles, each labelled with the rectangle ` +
-            'it came from and carrying its own grid. This is how a whole picture is swept in a few calls: ' +
-            'read a tile, mark what is in it, then cover that rectangle to find what you missed. Give either ' +
-            'this or region, compare or cover, not two of them.'
+            `most ${MAX_SHEET_TILES}: a picture swept in a few calls. They come back as one sheet of ` +
+            'tiles, each labelled with its rectangle and carrying its own grid. Read a tile, mark ' +
+            'what is in it, then cover that rectangle to find what you missed.'
         },
         marks: {
           type: 'boolean',
           description: 'Draw every mark placed so far (default false: the picture is what is being read). ' +
-            'Marks stay on the picture from call to call and are drawn at whatever rectangle and scale you ' +
-            'are looking at, so this is how the picture carries what you have already dealt with.'
+            'Marks stay from call to call and are drawn at whatever rectangle and scale you look at.'
         },
         compare: {
           type: 'array',
@@ -476,17 +475,17 @@ export function apply(ctx) {
   ctx.tools.register({
     name: 'vision_mark',
     description:
-      'Mark places on the picture by their original-image coordinates: `at` is [x, y] in ORIGINAL pixels, ' +
-      'read off the labelled grid lines and estimated between them. A mark STAYS on the picture: every later ' +
-      'look draws it, of the whole picture or of any rectangle of it, however closely you look, so the marks ' +
-      'you have placed are a record you read instead of remembering. Mark as you go — a place you have just ' +
-      'decided about is one you never have to hold in your head, and a batch typed afterwards is where ' +
-      'doubles and misses come from. LOOK FIRST — mark what you have seen in a vision_look picture, never a ' +
-      'position worked out from anywhere else. The picture comes back around what you just marked — one ' +
-      'tile per mark when they are spread across it — and every result lists the whole record, so a ring ' +
-      'that missed its face, a double or a wrong one shows at once. A mark that is nearly right is moved by ' +
-      'vision_edit, a wrong one is deleted by vision_unmark, and cover shows what is still unmarked. Nothing ' +
-      'here counts or judges what the picture holds — that is your statement to make.',
+      'Mark what you have decided, as you decide it: a mark STAYS on the picture — every later look ' +
+      'draws it, of the whole picture or of any rectangle of it, however closely you look — so the ' +
+      'marks you have placed are what you read instead of remembering, and a batch typed at the end is ' +
+      'where doubles and misses come from. LOOK FIRST — mark what you can see in a picture you have ' +
+      'looked at with vision_look; never a position worked out from anywhere else. `at` is [x, y] in ' +
+      'the picture\'s own pixels, read off the labelled lines. The picture comes back around what you ' +
+      'just marked — one tile per mark when they are spread across it — and every result lists the ' +
+      'whole record, so a ring that missed its face, a double or a wrong one shows at once. A mark ' +
+      'that is nearly right is moved by vision_edit, a wrong one is deleted by vision_unmark, and ' +
+      'cover shows what is still unmarked. Nothing here counts or judges what the picture holds — ' +
+      'that is your statement to make.',
     parameters: {
       type: 'object',
       additionalProperties: false,
