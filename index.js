@@ -409,7 +409,9 @@ export function apply(ctx) {
     name: 'vision_look',
     description:
       'See the picture, or a part of it, with a grid of the picture\'s own pixel coordinates drawn on ' +
-      'it and every line labelled: a number you read is a number you can use, and nothing is scaled. ' +
+      'it and every line labelled: a number you read is a number you can use. What arrives is a ' +
+      'rendering — the picture comes back at a size this tool chose, not the picture\'s own, so read ' +
+      'positions off the labels and never off the pixels of the image in front of you. ' +
       'Start here — a place is named from what you have seen. `region` is [x0, y0, x1, y1] read off ' +
       'those labels: leave it out for the whole picture, give a small one to read a face closely, or ' +
       'give `regions` — several rectangles at once — to sweep a picture in a few calls. Read a ' +

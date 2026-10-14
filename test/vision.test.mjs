@@ -12,7 +12,7 @@ import sharp from 'sharp'
 
 import { MUTATING_TOOLS, applyToolArgs, emptyRecord, markPoint, markRect } from '../lib/record.js'
 import { MAX_SHEET_TILES, describe as describeResult, planLook, planMark, recordLines } from '../lib/core.js'
-import { VIEW_TARGET, clampRegion, viewOf } from '../lib/render.js'
+import { MAX_SHEET_PIXELS, VIEW_TARGET, clampRegion, sheetLayout, viewOf } from '../lib/render.js'
 import {
   SIZES, frameRegion, gridLines, gridStep, placeAt, radiusFor, regionAround, regionOf, regionText
 } from '../lib/views.js'
@@ -201,6 +201,18 @@ test('a sheet holds a bounded number of rectangles', async () => {
     () => planLook({ record: emptyRecord('a.png'), args: { image: 'a.png', regions: many }, loadSource: loadSource(src) }),
     /regions holds at most 9 rectangles, got 10/
   )
+})
+
+test('a sheet is never bigger than the pipeline will carry', () => {
+  // A sixteen-tile sheet reached a caller as 1982x2114 rather than the 2530x2698 that
+  // was drawn: the pipeline resamples past about four mebipixels, and a caller that
+  // sees one size while being told another cannot read a position off it.
+  for (const count of [4, 9, 16, 36, 64]) {
+    const layout = sheetLayout(count)
+    const pixels = layout.width * layout.height
+    assert.ok(pixels <= MAX_SHEET_PIXELS,
+      `${count} tiles made a ${layout.width}x${layout.height} sheet, ${(pixels / 1e6).toFixed(2)}MP`)
+  }
 })
 
 test('a comparison sheet puts the marks side by side', async () => {
