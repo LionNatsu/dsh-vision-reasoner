@@ -1,0 +1,4 @@
+# Normalise to LF in the repository; a Windows checkout may still use CRLF.
+* text=auto eol=lf
+*.png binary
+*.tgz binary

@@ -1,0 +1,76 @@
+{
+  "name": "dsh-vision-reasoner",
+  "version": "0.1.1",
+  "description": "Mark things on a picture and look at the picture: a DeepSeek Harness plugin that turns an image into a record of numbered marks, with coordinate-labelled close-ups and comparison sheets you can check.",
+  "license": "MIT",
+  "author": "Lion Yang <lion@aosc.io> (https://github.com/LionNatsu)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LionNatsu/dsh-vision-reasoner.git"
+  },
+  "homepage": "https://github.com/LionNatsu/dsh-vision-reasoner#readme",
+  "bugs": {
+    "url": "https://github.com/LionNatsu/dsh-vision-reasoner/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "type": "module",
+  "main": "index.js",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./core": "./lib/core.js",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib/core.js",
+    "lib/draw.js",
+    "lib/record.js",
+    "lib/render.js",
+    "lib/client.js",
+    "icon.svg",
+    "locale/*.json",
+    "cordis.patch.yml",
+    "docs/DESIGN.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "plugin",
+    "vision",
+    "image",
+    "annotate",
+    "mark",
+    "zoom",
+    "reasoning"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dependencies": {
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "oxlint": "^1.88.0"
+  },
+  "scripts": {
+    "test": "node --test test/",
+    "lint": "oxlint --deny-warnings index.js lib tools test"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  }
+}

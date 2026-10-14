@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Vision Reasoner",
+    "description": "Let the model mark numbered places on a picture and look at what it drew: a ruler in original pixels, coordinate-gridded close-ups, several places as one sheet, and a cover that paints settled marks out."
+  }
+}
