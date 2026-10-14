@@ -436,7 +436,9 @@ export function apply(ctx) {
         },
         marks: {
           type: 'boolean',
-          description: 'Draw the marks on the picture (default false: the picture is what is being read).'
+          description: 'Draw every mark placed so far (default false: the picture is what is being read). ' +
+            'Marks stay on the picture from call to call and are drawn at whatever rectangle and scale you ' +
+            'are looking at, so this is how the picture carries what you have already dealt with.'
         },
         compare: {
           type: 'array',
@@ -475,15 +477,16 @@ export function apply(ctx) {
     name: 'vision_mark',
     description:
       'Mark places on the picture by their original-image coordinates: `at` is [x, y] in ORIGINAL pixels, ' +
-      'read off the labelled grid lines and estimated between them. LOOK FIRST — mark what you have seen ' +
-      'in a vision_look picture, never a position worked out from anywhere else. Mark a few places, read ' +
-      'the picture that comes back — around what you just marked, or one tile per mark when they are spread ' +
-      'across the picture, so a ring that missed its face is visible rather than implied — then continue: ' +
-      'every mark\'s coordinates are listed in every result, so a double mark or a wrong one shows at once. ' +
-      '`size` is the ring you judged by eye — s for one face in a crowd, m for a person, l for a group. A ' +
-      'mark that is nearly right is moved by vision_edit, a wrong one is deleted by vision_unmark, and ' +
-      'cover shows what is still unmarked. Nothing here counts or judges what the picture holds — that is ' +
-      'your statement to make.',
+      'read off the labelled grid lines and estimated between them. A mark STAYS on the picture: every later ' +
+      'look draws it, of the whole picture or of any rectangle of it, however closely you look, so the marks ' +
+      'you have placed are a record you read instead of remembering. Mark as you go — a place you have just ' +
+      'decided about is one you never have to hold in your head, and a batch typed afterwards is where ' +
+      'doubles and misses come from. LOOK FIRST — mark what you have seen in a vision_look picture, never a ' +
+      'position worked out from anywhere else. The picture comes back around what you just marked — one ' +
+      'tile per mark when they are spread across it — and every result lists the whole record, so a ring ' +
+      'that missed its face, a double or a wrong one shows at once. A mark that is nearly right is moved by ' +
+      'vision_edit, a wrong one is deleted by vision_unmark, and cover shows what is still unmarked. Nothing ' +
+      'here counts or judges what the picture holds — that is your statement to make.',
     parameters: {
       type: 'object',
       additionalProperties: false,
