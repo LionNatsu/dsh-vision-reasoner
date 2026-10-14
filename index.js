@@ -1,7 +1,7 @@
 /**
  * dsh-vision-reasoner (Host half).
  *
- * Registers the four tools, keeps each record as a fold of the session log, and
+ * Registers the five tools, keeps each record as a fold of the session log, and
  * stores the rendered views. This file is the wiring; the reasoning is in
  * docs/DESIGN.md.
  *
@@ -11,14 +11,14 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { COLOURS, DEFAULT_COLOUR, emptyRecord, imageKey, applyMarkArgs, applyUpdateArgs } from './lib/record.js'
-import { planList, planMark, planShow, planUpdate, describe as describeResult } from './lib/core.js'
+import { COLOURS, DEFAULT_COLOUR, MUTATING_TOOLS, applyToolArgs, emptyRecord, imageKey } from './lib/record.js'
+import { planList, planMark, planShow, planUnmark, planUpdate, describe as describeResult } from './lib/core.js'
 import { probeImageSize } from './lib/render.js'
 
 export const name = 'vision-reasoner'
 
 /**
- * `tools` to register the four tools, `fs` to read the picture through the
+ * `tools` to register the five tools, `fs` to read the picture through the
  * harness's own sandboxed path. `attachments` and `llm` are consulted when
  * present and never required: a composition without them can still keep the
  * record, it just cannot show the picture.
@@ -32,14 +32,14 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const SESSION_CACHE_LIMIT = 64
 const SOURCE_CACHE_LIMIT = 8
 
-const VIEW_MODES = ['map', 'marks', 'none']
+const VIEW_MODES = ['map', 'marks']
 
 /** Where rendered views are written, relative to the session working directory. */
 const VIEW_DIR = '.dsh-vision'
 const COLOUR_NAMES = Object.keys(COLOURS)
 
-/** Tools whose arguments change the record; everything else only reads it. */
-const MUTATING_TOOLS = new Set(['vision_mark', 'vision_update'])
+/** The tools the fold replays; everything else only reads the record. */
+const MUTATING = new Set(MUTATING_TOOLS)
 
 const IMAGE_VALUE_SCHEMA = {
   type: 'object',
@@ -126,7 +126,7 @@ const OP_ITEM_SCHEMA = {
   additionalProperties: false,
   required: ['id'],
   properties: {
-    id: { type: 'integer', description: 'The number drawn on the picture: 17, or "#17".' },
+    id: { type: 'integer', description: 'The number drawn on the picture.' },
     move: {
       type: 'array',
       items: { type: 'number' },
@@ -156,8 +156,8 @@ const MARK_VISIBILITY_PARAMETERS = {
 const VIEW_MODE_PARAMETER = {
   type: 'string',
   enum: VIEW_MODES,
-  description: 'map (the whole frame; the default), marks (a sheet of close-ups of exactly what this call ' +
-    'touched), or none (draw nothing — for batching several calls, then looking once with vision_show).'
+  description: 'map (the whole frame; the default, and what every call that changes the record comes ' +
+    'back with) or marks (a sheet of close-ups of exactly what this call touched).'
 }
 
 /**
@@ -208,9 +208,7 @@ function createRecordFolder() {
   function commit(state, pending) {
     const record = state.images[pending.key] ?? emptyRecord(pending.label)
     try {
-      state.images[pending.key] = pending.tool === 'vision_mark'
-        ? applyMarkArgs(record, pending.args).record
-        : applyUpdateArgs(record, pending.args).record
+      state.images[pending.key] = applyToolArgs(record, pending.tool, pending.args)
     } catch {
       // The call failed validation, so the tool threw the same way and changed
       // nothing. A replay has to agree with that, not guess.
@@ -223,7 +221,7 @@ function createRecordFolder() {
       for (const event of session.snapshotEvents(state.seq, session.seq)) {
         if (event.type === 'tool/call') {
           const data = event.data
-          if (!MUTATING_TOOLS.has(data.name)) continue
+          if (!MUTATING.has(data.name)) continue
           let args
           try {
             args = JSON.parse(data.arguments)
@@ -309,7 +307,7 @@ async function attachBlocker(ctx, exec, session) {
 }
 
 /**
- * Register the four tools.
+ * Register the five tools.
  * @param ctx - the plugin's own context, carrying `tools` and `fs`.
  */
 export function apply(ctx) {
@@ -558,6 +556,60 @@ export function apply(ctx) {
         ? `Look at ${args.views.join(' ')}`
         : args.cover !== undefined ? `Cover ${args.cover}` : `Look at ${args.image}`,
       kind: 'read',
+      locations: [{ path: args.image }]
+    })
+  })
+
+  ctx.tools.register({
+    name: 'vision_unmark',
+    description:
+      'Delete marks by number, e.g. [3, 7]. Use it as soon as a mark is in the wrong place: a number ' +
+      'left in the record still reads as a place you have already dealt with, so the mistake becomes ' +
+      'invisible. Give every number of one round in ONE call. The whole frame comes back redrawn.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['image', 'marks'],
+      properties: {
+        image: IMAGE_PARAMETER,
+        marks: {
+          type: 'array',
+          items: { type: 'integer' },
+          description: 'The numbers to delete, as drawn on the picture; vision_list prints them.'
+        },
+        view: VIEW_MODE_PARAMETER,
+        ...MARK_VISIBILITY_PARAMETERS
+      }
+    },
+    output: {
+      schema: recordResultSchema({
+        updated: {
+          type: 'object',
+          required: true,
+          additionalProperties: true,
+          properties: {}
+        },
+        removed: { type: 'array', required: true, items: { type: 'integer' } },
+        viewMode: { type: 'string', required: true, enum: VIEW_MODES }
+      }),
+      render: (_args, value) => renderContent(value),
+      presentationMeta: (_args, value) => presentationMetaOf(value)
+    },
+    async execute(args, exec) {
+      const session = requireSession(exec)
+      const record = records(session, imageKey(args.image, session.header.cwd), args.image)
+      const planned = await planUnmark({
+        record,
+        args,
+        loadSource: () => loadSource(args.image, exec)
+      })
+      const attached = await attach(planned.views, exec, session)
+      return { ...planned.result, ...attached }
+    },
+    presentCall: (args) => ({
+      card: 'generic',
+      title: `Remove ${args.marks?.length ?? 0} mark(s) from ${args.image}`,
+      kind: 'other',
       locations: [{ path: args.image }]
     })
   })

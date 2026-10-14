@@ -16,7 +16,7 @@ import {
 } from '../lib/record.js'
 import { escapeXml, fitText, fitView, mapOverlay, textWidth } from '../lib/draw.js'
 import { renderViews } from '../lib/render.js'
-import { describe as describeResult, planList, planMark, planShow, planUpdate } from '../lib/core.js'
+import { describe as describeResult, planList, planMark, planShow, planUnmark, planUpdate } from '../lib/core.js'
 import { COLOURS } from '../lib/draw.js'
 
 /** A deterministic synthetic photograph: a gradient with hard edges to align to. */
@@ -349,13 +349,15 @@ async function withSource() {
   return { bytes: await scene(600, 400), width: 600, height: 400, orientation: 1 }
 }
 
-test('view:none draws nothing, view:marks shows exactly what was touched', async () => {
-  const none = await planMark({
-    record: emptyRecord('a.jpg'),
-    args: { marks: [{ at: [1, 2] }], view: 'none' },
-    loadSource: () => { throw new Error('must not read the picture when no view was asked for') }
-  })
-  assert.deepEqual(none.views, [])
+test('view:marks shows exactly what was touched, and nothing else is accepted', async () => {
+  await assert.rejects(
+    () => planMark({
+      record: emptyRecord('a.jpg'),
+      args: { marks: [{ at: [1, 2] }], view: 'none' },
+      loadSource: withSource
+    }),
+    /view must be one of map, marks/
+  )
   const marks = await planMark({
     record: emptyRecord('a.jpg'),
     args: { marks: [{ at: [100, 200] }, { at: [300, 300] }], view: 'marks' },
@@ -378,6 +380,25 @@ test('an update shows the marks it changed, and a removal is not shown', async (
   assert.match(text, /removed #2/)
   assert.match(text, /1 mark in the record/)
   assert.equal(planned.views[0].kind, 'zoom', 'only one mark was touched, so no sheet')
+})
+
+test('an update returns the whole frame, and a removal is its own call', async () => {
+  const { record } = applyMarkArgs(emptyRecord('a.jpg'), { marks: [{ at: [100, 100] }, { at: [200, 200] }] })
+  // No `view` asked for: a mutation comes back with the frame it changed.
+  const updated = await planUpdate({
+    record,
+    args: { ops: [{ id: 1, caption: 'moved on' }] },
+    loadSource: withSource
+  })
+  assert.equal(updated.views[0].kind, 'map')
+  const unmarked = await planUnmark({ record, args: { marks: [1, 2] }, loadSource: withSource })
+  assert.deepEqual(unmarked.result.removed, [1, 2])
+  assert.equal(unmarked.result.marks, 0)
+  assert.equal(unmarked.views[0].kind, 'map', 'the deletion is shown in the frame it happened in')
+  await assert.rejects(() => planUnmark({ record, args: { marks: [] }, loadSource: withSource }),
+    /non-empty array/)
+  await assert.rejects(() => planUnmark({ record, args: { marks: [9] }, loadSource: withSource }),
+    /no mark #9/)
 })
 
 test('show can ask for a map and a cover in one call', async () => {

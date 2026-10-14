@@ -193,12 +193,13 @@ test('every tool value satisfies its own declared output schema', async (t) => {
   const session = fakeSession()
   // A committed mark first, so the addresses below exist in the record.
   await committedCall(harness, 'vision_mark',
-    { image: imagePath, marks: [{ at: [100, 100] }, { at: [200, 200], colour: 'yellow' }], view: 'none' },
+    { image: imagePath, marks: [{ at: [100, 100] }, { at: [200, 200], colour: 'yellow' }] },
     session, 'seed-1')
   const calls = [
-    ['vision_mark', { image: imagePath, marks: [{ at: [300, 300] }], view: 'none' }],
+    ['vision_mark', { image: imagePath, marks: [{ at: [300, 300] }] }],
     ['vision_show', { image: imagePath, views: ['#1', '#2'] }],
-    ['vision_update', { image: imagePath, ops: [{ id: 1, caption: 'half hidden' }], view: 'none' }],
+    ['vision_update', { image: imagePath, ops: [{ id: 1, caption: 'half hidden' }] }],
+    ['vision_unmark', { image: imagePath, marks: [1] }],
     ['vision_list', { image: imagePath }]
   ]
   for (const [toolName, args] of calls) {
@@ -232,10 +233,10 @@ test('the record is a fold: a committed call counts, a failed one does not', asy
     step: 1,
     callId: 'call-1',
     name: 'vision_mark',
-    arguments: JSON.stringify({ image: imagePath, marks: [{ at: [10, 10] }, { at: [20, 20] }], view: 'none' })
+    arguments: JSON.stringify({ image: imagePath, marks: [{ at: [10, 10] }, { at: [20, 20] }] })
   })
   const first = await call(harness, 'vision_mark',
-    { image: imagePath, marks: [{ at: [10, 10] }, { at: [20, 20] }], view: 'none' }, session)
+    { image: imagePath, marks: [{ at: [10, 10] }, { at: [20, 20] }] }, session)
   assert.deepEqual(first.value.marked, [1, 2], 'the live call sees its own numbering')
 
   // Until the result lands, the record has not changed...
@@ -295,6 +296,23 @@ test('the record is a fold: a committed call counts, a failed one does not', asy
   const updated = await call(harness, 'vision_list', { image: imagePath }, session)
   assert.equal(updated.value.marks, 1)
   assert.equal(updated.value.items[0].caption, 'half hidden')
+
+  // A deletion is a mutation too: if the fold does not see it, a reopened session
+  // keeps a mark that was removed.
+  session.append('tool/call', {
+    turn: 3,
+    step: 1,
+    callId: 'call-5',
+    name: 'vision_unmark',
+    arguments: JSON.stringify({ image: imagePath, marks: [1] })
+  })
+  session.append('tool/result', {
+    turn: 3,
+    step: 1,
+    message: { role: 'tool', toolCallId: 'call-5', isError: false }
+  })
+  const unmarked = await call(harness, 'vision_list', { image: imagePath }, session)
+  assert.equal(unmarked.value.marks, 0, 'a removed mark is gone from the replayed record')
 })
 
 test('a picture is attached, and its path is reported when the backend has one', async (t) => {

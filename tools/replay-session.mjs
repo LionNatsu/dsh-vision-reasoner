@@ -12,11 +12,11 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { zstdDecompressSync } from 'node:zlib'
 
-import { applyMarkArgs, applyUpdateArgs, emptyRecord, imageKey, recordSummary } from '../lib/record.js'
+import { MUTATING_TOOLS, applyToolArgs, emptyRecord, imageKey, recordSummary } from '../lib/record.js'
 import { renderViews } from '../lib/render.js'
 import { probeImageSize } from '../lib/render.js'
 
-const MUTATING = new Set(['vision_mark', 'vision_update'])
+const MUTATING = new Set(MUTATING_TOOLS)
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 
@@ -117,9 +117,7 @@ for (const event of events) {
     const key = imageKey(call.args.image, sessionCwd)
     const record = records.get(key) ?? emptyRecord(call.args.image)
     try {
-      records.set(key, call.tool === 'vision_mark'
-        ? applyMarkArgs(record, call.args).record
-        : applyUpdateArgs(record, call.args).record)
+      records.set(key, applyToolArgs(record, call.tool, call.args))
     } catch (error) {
       console.error(`a committed call did not replay: ${error.message}`)
     }
