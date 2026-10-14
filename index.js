@@ -1,41 +1,9 @@
 /**
  * dsh-vision-reasoner (Host half).
  *
- * Four model-facing tools over one idea: a mark is a position, a number, a
- * caption and a colour, and the number is drawn on the picture — so `#17` can be
- * pointed at, moved, recoloured or deleted without describing it in words.
- * Nothing here counts or judges: how many things are in the picture is the
- * model's statement to make, and the record only says how many numbers it has
- * drawn.
- *
- * Three commitments shape this file.
- *
- * **The record lives in the session, and nothing is written anywhere else.** The
- * harness already logs every tool call with its full arguments and every result,
- * so the record is a pure fold of events the platform writes anyway: a
- * `tool/call` is a pending mutation, its `tool/result` without an error commits
- * it, a failed one drops it, and a `turn/end` drops anything left over. So
- * nothing is written beside the user's picture, and no new event
- * vocabulary is invented — which matters, because `Session.append` cannot set
- * the `ignorable` envelope marker that `@deepseek-ai/dsh-session` requires
- * before its read path will accept an event type it does not know. A downstream
- * plugin that invented one would leave session restore broken behind it. The
- * fold calls the same `applyMarkArgs` / `applyUpdateArgs` the live call uses, so
- * a record rebuilt after a restart is the record the model was working with, by
- * construction rather than by test.
- *
- * **The picture reaches the model the way the harness sends pictures.** A view
- * is rendered to PNG and committed through `ctx.attachments.saveImage`, then
- * travels as a `{ type: 'image', attachment }` block — the exact shape
- * `read_image` uses, and the reason showing a picture needs no file on disk.
- * When that is impossible (no attachment service, or a route whose model does
- * not declare image input) the tool says so and returns its text: an image block
- * on a text-only route fails the whole request, and a tool that breaks a turn is
- * a worse failure than a tool that reports what it could not show.
- *
- * **Reading the picture goes through `ctx.fs`.** The filesystem service is the
- * sandbox's own path, so a picture outside the permitted roots is refused by the
- * harness instead of being read around it by a plugin holding `node:fs`.
+ * Registers the four tools, keeps each record as a fold of the session log, and
+ * stores the rendered views. This file is the wiring; the reasoning is in
+ * docs/DESIGN.md.
  *
  * @module dsh-vision-reasoner
  */
@@ -171,12 +139,7 @@ const OP_ITEM_SCHEMA = {
   }
 }
 
-/**
- * Switches that quiet the marks down, shared by every tool that draws them.
- *
- * In a dense scene the rings and numbers sit on top of exactly what a caller is
- * trying to read. Turning them off is cheaper than another view.
- */
+/** Switches that keep the marks from covering what is being read. */
 const MARK_VISIBILITY_PARAMETERS = {
   ids: {
     type: 'boolean',
@@ -198,13 +161,8 @@ const VIEW_MODE_PARAMETER = {
 }
 
 /**
- * What a look can be asked for.
- *
- * Deliberately short. Every parameter here is part of the schema the model
- * receives on EVERY request, so a knob nobody turns is a permanent tax on the
- * context window. The library still accepts the rest (`lib/render.js`: tile size,
- * sheet columns, grid spacing, cover opacity, ruler, padding …); what the MODEL
- * can ask for is the short list with a decision behind it.
+ * What a look can be asked for. Every parameter here reaches the model on every
+ * request, so it gets the short list; `lib/render.js` accepts the rest.
  */
 const LOOK_PARAMETERS = {
   views: {
@@ -230,11 +188,8 @@ const LOOK_PARAMETERS = {
 }
 
 /**
- * Fold every session's mark records out of its own log.
- *
- * State is `{ images, pending }`: records by normalised image path, and the
- * mutations whose result has not been committed yet. All of it is plain JSON,
- * because the fold has to be reproducible from the log alone.
+ * Fold each session's mark records out of its own log: `{ images, pending }`,
+ * all plain JSON, because the fold has to be reproducible from the log alone.
  */
 function createRecordFolder() {
   const sessions = new Map()
@@ -304,12 +259,9 @@ function createRecordFolder() {
 }
 
 /**
- * What the Web client reads off a result: the picture it can open, the source
- * picture, and how many numbers are drawn.
- *
- * Every field must be lossless JSON, and a key whose value is `undefined` is
- * not: the registry rejects the whole result when it is. `vision_list` returns
- * no picture at all, so `path` is omitted rather than written as `undefined`.
+ * The metadata the Web client reads off a result. It must be lossless JSON — the
+ * registry rejects a result carrying an `undefined` key — so `path` is omitted
+ * when there is no picture.
  */
 function presentationMetaOf(value) {
   const first = value.images?.[0]
@@ -332,16 +284,12 @@ function requireSession(exec) {
 /**
  * Whether the picture can be attached to this request at all.
  *
- * Fail OPEN on anything uncertain, and closed only on a positive answer. A route
- * whose model does not declare image input cannot make use of the picture —
- * `read_image` refuses on the same gate — so returning text is the honest answer
- * there, and the tool says so rather than pretending it showed something.
- *
- * Everything else attaches anyway. An earlier version also gave up when
- * `resolveModelInfo` threw, the `llm` service was absent, or the route was
- * unknown, and the cost of that caution was concrete: an unrelated adapter
- * hiccup silently replaced the caller's picture with a note blaming the route.
- * Unknowable is not the same as incapable.
+ * Only a positive answer blocks it: a model that does not declare image input
+ * cannot use the picture, and `read_image` refuses on the same gate. Anything
+ * merely unknown — no `llm` service, a throwing `resolveModelInfo`, an
+ * unresolvable route — attaches anyway. Unknowable is not the same as incapable,
+ * and an adapter hiccup must not replace the picture with a note blaming the
+ * route.
  */
 async function attachBlocker(ctx, exec, session) {
   if (ctx.get('attachments') === undefined) return 'no attachment service is mounted'
@@ -368,11 +316,7 @@ export function apply(ctx) {
   const records = createRecordFolder()
   const sources = new Map()
 
-  /**
-   * Read one picture through the harness's filesystem service, cached by the
-   * version that service reports, so a second look in the same turn does not
-   * re-read a 400 KB file.
-   */
+  /** Read one picture through `ctx.fs`, cached by the version it reports. */
   async function loadSource(image, exec) {
     const cwd = exec.agent?.session?.header?.cwd
     const target = await ctx.fs.resolve(image, { cwd, signal: exec.signal })
@@ -404,19 +348,9 @@ export function apply(ctx) {
   }
 
   /**
-   * Commit the rendered views so the result can carry image blocks.
-   *
-   * No file is written by this plugin: `saveImage` stores a normalized,
-   * content-addressed copy in the harness's own attachment store and hands back
-   * a reference. Where that copy physically lands is the deployment's business,
-   * so the path is reported when the backend can name one AND the harness can
-   * translate it into the world the model is running in (`processPathFromHostPath`
-   * — a host path inside a sandbox is not a path the model can open). A caller
-   * that wants to open the picture, or hand it to `present`, needs that path.
-   *
-   * A storage failure is reported, not thrown: the record the call just changed
-   * is real and durable whether or not the picture could be stored, and failing
-   * the whole call would tell the model its marks did not happen.
+   * Store the rendered views so the result can carry image blocks and the Web UI
+   * can open them. A storage failure is reported, not thrown: the record has
+   * already changed, and failing the call would deny work that happened.
    */
   async function attach(views, exec, session) {
     if (views.length === 0) return { images: [], attached: true }

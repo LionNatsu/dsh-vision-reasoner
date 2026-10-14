@@ -1,23 +1,14 @@
 /**
  * The Host half, against a stand-in harness.
  *
- * Three things are checked here that nothing else can check without a running
- * DSH process:
+ * Checks what needs no running DSH process: every returned value satisfies its
+ * declared output schema (the registry rejects a mismatch at dispatch — how a
+ * `vision_list` value once went out without `views`), the record really is a
+ * fold, and the failure paths report rather than throw.
  *
- *   1. **Every tool's returned value satisfies its own declared output schema.**
- *      The registry enforces this at dispatch, and a missing required key is
- *      rejected as an invalid result — which is how a `vision_list` value once
- *      went out without `views`.
- *   2. **The record really is a fold of the session log.** A `tool/call` plus a
- *      successful `tool/result` commits a mutation; a failed result drops it; a
- *      call still pending at `turn/end` never happened.
- *   3. **Failure paths are honest**: a text-only route returns text and says the
- *      picture was not attached, and a caller with no session is refused.
- *
- * The stand-in harness is deliberately literal — a session that is a list of
- * events, a filesystem that reads one file, an attachment service that counts
- * what it was given — so the test fails when the plugin's assumptions about the
- * harness change, not when a mock drifts.
+ * The stand-in is deliberately literal — a session is a list of events, the
+ * filesystem reads one file — so a test fails when the plugin's assumptions about
+ * the harness change, not when a mock drifts.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -111,9 +102,7 @@ function fakeHarness({
   return { tools, saved, ctx }
 }
 
-/**
- * Run one tool the way the registry does: validate arguments, then the value.
- */
+/** Run one tool as the registry does: execute it, then render its content. */
 async function call(harness, toolName, args, session, signal) {
   const tool = harness.tools.get(toolName)
   assert.ok(tool, `${toolName} was not registered`)
@@ -123,9 +112,8 @@ async function call(harness, toolName, args, session, signal) {
 }
 
 /**
- * Run one tool the way the harness runs it: commit the `tool/call`, dispatch,
- * then commit the `tool/result`. This is what makes a mutation durable, since
- * the record is a fold of exactly those two events.
+ * Run one tool as the harness runs it: commit the `tool/call`, dispatch, then
+ * commit the `tool/result` — the two events the record is folded from.
  */
 async function committedCall(harness, toolName, args, session, callId) {
   session.append('tool/call', {
@@ -145,12 +133,9 @@ async function committedCall(harness, toolName, args, session, callId) {
 }
 
 /**
- * Does a value satisfy a schema, for the subset these tools declare?
- *
- * This mirrors what the registry does at dispatch: required keys must be
- * present, declared types must match, and `additionalProperties: false` must
- * hold. It is not a general JSON-schema implementation and does not need to be —
- * it needs to fail the same way the registry fails.
+ * Does a value satisfy a schema, for the subset these tools declare? Required
+ * keys, declared types and `additionalProperties: false`, failing the way the
+ * registry fails rather than implementing all of JSON Schema.
  */
 function schemaViolations(schema, value, path = 'value') {
   const problems = []

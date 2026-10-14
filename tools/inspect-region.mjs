@@ -1,6 +1,5 @@
 /**
- * Dev check: print a region of an image as coarse ASCII, so a label's placement
- * can be verified pixel by pixel rather than by squinting at a thumbnail.
+ * Print a region of an image as coarse ASCII, for checking where a label landed.
  *
  *   node tools/inspect-region.mjs IMAGE X Y W H
  */

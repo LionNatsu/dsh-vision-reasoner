@@ -1,10 +1,9 @@
 /**
  * The record, the views and the shared call layer.
  *
- * Deliberately about invariants rather than snapshots: a record has to be
- * reproducible from the calls that produced it, a number printed on a view has
- * to be an original-image coordinate, a mark has to land where the record says
- * it does, and no result may ever claim to know what a picture holds.
+ * About invariants, not snapshots: a record is reproducible from the calls that
+ * produced it, a label on a view is an original-image coordinate, a mark lands
+ * where the record says, and no result claims to know what a picture holds.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

@@ -1,18 +1,13 @@
 /**
  * Rebuild a mark record from a stored session log, outside the harness.
  *
- * The DSH half of this plugin keeps no state of its own: the record is a fold of
- * the `tool/call` and `tool/result` events the harness writes anyway. This tool
- * does that fold from a `.jsonl.zstd` session file with no harness, no model and
- * no attachment service in the loop — which is the strongest available check
- * that the design claim is true, and a way to see what another session actually
- * marked.
+ * The plugin keeps no state of its own, so a session's record can be recovered
+ * from its log alone: this does that fold with no harness, model or attachment
+ * service in the loop. With `--png` the recovered record is rendered onto the
+ * picture it names.
  *
  *   node tools/replay-session.mjs <session.v4.jsonl.zstd> [--image <name>]
  *   node tools/replay-session.mjs <session...> --png <out.png>
- *
- * With `--png`, the recovered record is rendered onto the picture it names, so
- * the marks can be looked at rather than only listed.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { zstdDecompressSync } from 'node:zlib'
@@ -28,13 +23,11 @@ const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 /**
  * Read a session log's text.
  *
- * A DSH session log is a CONCATENATION of zstd frames — one per append — and
- * `zstdDecompressSync` stops after the first, which for a real log is only the
- * header. `ZSTD_findFrameCompressedSize` is not exposed to JavaScript, so each
- * frame's end is found by decompressing from every candidate magic offset and
- * taking the shortest slice that decodes: a slice spanning two frames also
- * decodes, so the shortest success is the boundary. (`dsh-context-explorer`'s
- * `tools/zstd-frames.mjs` solves the same problem the same way.)
+ * A log is a concatenation of zstd frames, one per append, and
+ * `zstdDecompressSync` stops after the first — for a real log, only the header.
+ * `ZSTD_findFrameCompressedSize` is not exposed to JavaScript, so each frame end
+ * is found by decompressing from every candidate magic offset: a slice spanning
+ * two frames also decodes, so the shortest success is the boundary.
  */
 function readSessionLog(buffer) {
   const offsets = []
@@ -92,11 +85,9 @@ for (const line of text.split('\n')) {
 }
 
 /**
- * The session's own working directory, from the header record the log opens
- * with. The plugin keys a record by `imageKey(image, session.header.cwd)`, so a
- * replay that used the process cwd instead would print a DIFFERENT key and a
- * different record for any relative image path — which would make this tool's
- * whole point (an outside reader rebuilding the record) quietly untrue.
+ * The session's own working directory, from the header record the log opens with.
+ * The plugin keys a record by `imageKey(image, session.header.cwd)`, so a replay
+ * using the process cwd would compute a different key for a relative path.
  */
 const sessionCwd = events.find((event) => event.type === 'session')?.cwd
 

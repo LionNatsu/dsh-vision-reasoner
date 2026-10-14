@@ -1,8 +1,7 @@
 /**
- * Dev check: print the harness's own tool-row CSS rules, so a third-party row can
- * match them. The rules live in a hashed CSS-module string inside the shipped
- * client bundle; the class NAMES are internal, but the declarations are the
- * answer to "what does a native row look like".
+ * Print the harness's tool-row CSS, so a third-party row can match it. The rules
+ * live in hashed CSS-module strings in the shipped client bundle: the class names
+ * are internal, the declarations are what a native row looks like.
  *
  *   node tools/row-css.mjs                        # every rule
  *   node tools/row-css.mjs _root _title _fileLink # only rules matching a name
