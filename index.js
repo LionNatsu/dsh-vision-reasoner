@@ -127,8 +127,8 @@ const MARK_ITEM_SCHEMA = {
   properties: {
     cell: {
       type: 'string',
-      description: 'The one cell you can see it in, read off the grid — `C3`. Look closer first if a cell ' +
-        'is too coarse to tell one thing from its neighbour.'
+      description: 'The one cell you can see it in, read off the grid — `C3`. The ring is drawn at the ' +
+        'centre of that cell, so look closer until the cell is about the size of the thing you are marking.'
     },
     size: SIZE_PARAMETER,
     caption: { type: 'string', description: 'A few words drawn beside the number, e.g. "half hidden".' },
@@ -406,9 +406,10 @@ export function apply(ctx) {
       '("A1-C4") — and looking again inside the new view takes you another, which is how one face in a crowd ' +
       'is finally read; a view is never coarser than the whole picture. The picture comes back with a ' +
       'grid whose letters and numbers are on all four edges; the result names the view handle to copy ' +
-      'back. It is drawn without your marks unless you ask for `marks: true`; `compare` puts marks side by ' +
-      'side to ask "is this one thing or two"; `cover` paints a colour out, so whatever still shows has ' +
-      'not been marked.',
+      'back. This grid is the only ruler here: do not crop the picture with another tool, and do not read ' +
+      'a position off any other view of it, whose pixels are a different size. It is drawn without your ' +
+      'marks unless you ask for `marks: true`; `compare` puts marks side by side to ask "is this one ' +
+      'thing or two"; `cover` paints a colour out, so whatever still shows has not been marked.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -422,8 +423,8 @@ export function apply(ctx) {
         },
         cell: {
           type: 'string',
-          description: 'The part of that view to look at closer: a cell, "C3", or a block of cells, "A1-C4", ' +
-            'for a band of them. Omit it to look at the view as it is.'
+          description: 'The part of that view to look at closer: a cell, "C3" (column C, row 3), or a block ' +
+            'of cells, "A1-C4", for a band of them. Omit it to look at the view as it is.'
         },
         marks: {
           type: 'boolean',
@@ -468,7 +469,9 @@ export function apply(ctx) {
       'marked at all. If a cell is too coarse to tell one thing from its neighbour, look closer at it ' +
       'first and mark in the closer view. Mark a few places, read the picture that comes back, then ' +
       'continue; the whole record is listed in every result, so double marks and mistakes show up as you ' +
-      'go. Nothing here counts or judges what the picture holds — that is your statement to make.',
+      'go. A mark that is nearly right is moved by vision_edit, a wrong one is deleted by vision_unmark, ' +
+      'and cover shows what is still unmarked. Nothing here counts or judges what the picture holds — that ' +
+      'is your statement to make.',
     parameters: {
       type: 'object',
       additionalProperties: false,
