@@ -400,7 +400,7 @@ test('a picture is attached, and its path is reported when the backend has one',
   assert.equal(content[1].attachment.attachmentId, 'attachment-1')
   assert.match(content[0].text, /no marks yet/)
   assert.match(content[0].text, /\(800x600\)/, 'the picture\'s own size, in original pixels')
-  assert.match(content[0].text, /view 0,0,800,600 — grid every 100 original pixels, marks drawn/)
+  assert.match(content[0].text, /view 0,0,800,600 — grid every 50 original pixels, marks drawn/)
   assert.match(content[0].text, /saved as \.dsh-vision\/frame-photo\.png \(1400x1050\)/)
 })
 

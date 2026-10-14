@@ -32,20 +32,19 @@ const loadSource = (src) => async () => src
 
 test('a grid steps in round numbers of the picture\'s own pixels', () => {
   const view = viewOf(frame(), VIEW_TARGET)
-  // 1200x800 at 1400 wide is 1.17 view pixels per picture pixel, so a 100 step sits
-  // 117 apart and a 50 step would crowd the labels.
-  assert.equal(gridStep(frame(), view), 100)
-  assert.deepEqual(gridLines(frame(), view).across,
-    [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200])
-  assert.deepEqual(gridLines(frame(), view).down, [0, 100, 200, 300, 400, 500, 600, 700, 800])
+  // 1200x800 at 1400 wide is 1.17 view pixels per picture pixel, so a 50 step sits 58
+  // apart — near enough to read a face off — and a 20 step would crowd the labels.
+  assert.equal(gridStep(frame(), view), 50)
+  assert.deepEqual(gridLines(frame(), view).across.slice(0, 5), [0, 50, 100, 150, 200])
+  assert.deepEqual(gridLines(frame(), view).down.slice(0, 4), [0, 50, 100, 150])
 
-  // Four times closer: the same labels would be 467 apart, so the grid steps finer.
+  // Four times closer: a 20 step now sits 93 apart.
   const closer = regionOf([300, 200, 600, 400], 1200, 800)
-  assert.equal(gridStep(closer, viewOf(closer, VIEW_TARGET)), 50)
+  assert.equal(gridStep(closer, viewOf(closer, VIEW_TARGET)), 20)
 
   // A picture much larger than the view steps coarser, so labels never collide.
   const huge = frameRegion(20000, 15000)
-  assert.equal(gridStep(huge, viewOf(huge, VIEW_TARGET)), 2000)
+  assert.equal(gridStep(huge, viewOf(huge, VIEW_TARGET)), 1000)
 })
 
 test('a place is read in the picture\'s own pixels, and refused outside it', () => {
@@ -71,7 +70,7 @@ test('a region is four numbers, trimmed to the picture, either way round', () =>
 test('a size is a ring in pixels, the same whatever is being looked at', () => {
   assert.deepEqual(SIZES, { s: 30, m: 60, l: 120 })
   assert.equal(radiusFor('s'), 30)
-  assert.equal(radiusFor(undefined), 60, 'a caller that says nothing gets the middle size')
+  assert.equal(radiusFor(undefined), 30, 'a caller that says nothing gets the crowd size')
   assert.throws(() => radiusFor('xl'), /size must be one of s, m, l/)
 })
 
@@ -137,12 +136,12 @@ test('looking closer draws the rectangle it was asked for, at the frame\'s own s
   })
   assert.equal(looked.result.region, '300,200,600,400')
   assert.equal(looked.result.picture, '1200x800')
-  assert.equal(looked.result.step, 50)
+  assert.equal(looked.result.step, 20)
   assert.equal(looked.views[0].kind, 'crop')
   assert.equal(looked.views[0].name, 'crop-300-200-a.png')
   assert.equal(looked.views[0].width, VIEW_TARGET)
   assert.ok(looked.views[0].height <= VIEW_TARGET)
-  assert.match(describeResult(looked.result), /grid every 50 original pixels/)
+  assert.match(describeResult(looked.result), /grid every 20 original pixels/)
 })
 
 test('a look the caller did not ask to be marked comes back clean', async () => {
@@ -174,7 +173,7 @@ test('marking reports where it landed, and draws a rectangle around it', async (
   assert.deepEqual(marked.result.record, ['#1 600,400 green', '#2 660,460 green'])
   assert.equal(marked.result.region, '549,349,711,511', 'around what was just marked')
   assert.equal(marked.result.views[0].kind, 'crop')
-  assert.equal(marked.result.step, 20, 'and the grid is finer there, because the view is closer')
+  assert.equal(marked.result.step, 10, 'and the grid is finer there, because the view is closer')
 })
 
 test('several rectangles come back as one sheet, each labelled with where it came from', async () => {

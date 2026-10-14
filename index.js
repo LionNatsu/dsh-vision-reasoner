@@ -131,7 +131,7 @@ const SIZE_PARAMETER = {
   type: 'string',
   enum: ['s', 'm', 'l'],
   description: 'How big the ring is drawn, in the picture\'s own pixels: s is 60 px across for one face in a ' +
-    'crowd, m is 120 px for a person, l is 240 px for a group or a large area.'
+    'crowd and is the default, m is 120 px for a person, l is 240 px for a group or a large area.'
 }
 
 const MARK_ITEM_SCHEMA = {
