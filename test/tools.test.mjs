@@ -237,7 +237,8 @@ test('every tool value satisfies its own declared output schema', async (t) => {
     ['vision_unmark', { image: imagePath, marks: [1] }],
     ['vision_look', { image: imagePath, region: [100, 100, 500, 400], marks: true }],
     ['vision_look', { image: imagePath, compare: [2] }],
-    ['vision_look', { image: imagePath, cover: 'green' }]
+    ['vision_look', { image: imagePath, cover: 'green' }],
+    ['vision_look', { image: imagePath, region: [100, 100, 400, 300], cover: 'all' }]
   ]
   for (const [toolName, args] of calls) {
     const { value, content } = await call(harness, toolName, args, session)
@@ -361,12 +362,16 @@ test('the picture comes back around what was just marked', async (t) => {
   assert.equal(near.value.region, '149,149,311,311')
   assert.equal(near.value.views[0].kind, 'crop')
 
-  // Places spread across the picture: the whole picture, because a rectangle
-  // around them would be the picture anyway.
+  // Places spread across the picture: one tile per mark, because the whole picture
+  // is too coarse to see whether a ring is on what it names. A row of marks across a
+  // photograph once came back as that picture, 10% off every face, and said nothing.
   const far = await call(harness, 'vision_mark',
     { image: imagePath, marks: [{ at: [80, 80] }, { at: [720, 520] }] }, session)
   assert.equal(far.value.region, '0,0,800,600')
-  assert.equal(far.value.views[0].kind, 'frame')
+  assert.equal(far.value.views[0].kind, 'compare')
+  assert.equal(far.value.views[0].name, 'check-2-photo.png')
+  assert.equal(far.value.views[0].label, '#1, #2', 'the near call was never committed, so these are the first two')
+  assert.ok(far.value.views[0].width > 0 && far.value.views[0].height > 0)
 })
 
 test('a picture is attached, and its path is reported when the backend has one', async (t) => {
