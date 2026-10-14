@@ -12,10 +12,10 @@ import sharp from 'sharp'
 
 import { applyMarkArgs, applyToolArgs, emptyRecord, markRect } from '../lib/record.js'
 import {
-  SIZES, cellOf, cellRegion, describeGrid, gridFor, parseCell, parseRegion, placeOn, radiusFor,
-  regionToken, viewRegion
+  SIZES, cellOf, cellRegion, cellsRegion, cellsSpec, describeGrid, gridFor, parseCell, parseRegion,
+  placeOn, radiusFor, regionToken, viewRegion
 } from '../lib/views.js'
-import { clampRegion, frameRegion, renderRegion, viewOf } from '../lib/render.js'
+import { VIEW_TARGET, clampRegion, frameRegion, renderRegion, viewOf } from '../lib/render.js'
 import {
   describe as describeResult, planEdit, planLook, planMark, planUnmark, recordLines
 } from '../lib/core.js'
@@ -94,7 +94,23 @@ test('a cell is named, checked, and turned into a place', () => {
   assert.equal(cellOf(placeOn('C3', region, grid), region, grid), 'C3', 'a cell centre names that cell')
   assert.equal(cellOf(placeOn('c3', region, grid), region, grid), 'C3', 'the name is read as written')
   assert.throws(() => parseCell('Z9', grid), /outside this view, which is 10x7 A-J 1-7/)
-  assert.throws(() => parseCell('C3!', grid), /at must be a cell like "C3"/)
+  assert.throws(() => parseCell('C3!', grid), /cell must be a name like "C3"/)
+})
+
+test('a block of cells is a region named off the same grid', () => {
+  const region = frame()
+  const grid = gridFor(region)
+  assert.deepEqual(cellsRegion(region, grid, 'C3'), cellRegion(region, grid, 'C3'))
+  // A1-C4 on a 10x7 grid over 1200x800: three columns, four rows.
+  assert.deepEqual(cellsRegion(region, grid, 'A1-C4'), { x0: 0, y0: 0, x1: 360, y1: 457 })
+  assert.deepEqual(cellsRegion(region, grid, 'A1-C4'), cellsRegion(region, grid, 'C4-A1'),
+    'either corner may be named first')
+  assert.equal(cellsSpec('a1-c4', grid), 'A1-C4')
+  assert.equal(cellsSpec('c3', grid), 'C3')
+  assert.throws(() => cellsSpec('A1-B2-C3', grid), /cell must be a name like "C3" or a block like "A1-C4"/)
+  assert.throws(() => cellsSpec('A1-Z9', grid), /outside this view/)
+  // A block is for looking at, not for placing: a mark is one cell.
+  assert.throws(() => placeOn('A1-C4', region, grid), /cell must be a name like "C3"/)
 })
 
 test('a handle reproduces the region exactly, and holds no letters', () => {
@@ -170,7 +186,7 @@ test('a call without the view it was shown is refused', () => {
     image: 'a.png',
     view: token(),
     marks: [{ size: 'm' }]
-  }), /at must be a cell like "C3"/)
+  }), /cell must be a name like "C3"/)
 })
 
 test('a move names a cell; a box keeps its own extent', () => {
@@ -219,10 +235,14 @@ test('a region that runs off the picture is trimmed, not refused', () => {
 test('a closer look magnifies, and carries its own grid', async () => {
   const src = await source()
   const cell = cellRegion(frame(), gridFor(frame()), 'C3')
-  const frameView = viewOf(frame(), 1400)
-  const cellView = viewOf(cell, 900)
+  const frameView = viewOf(frame(), VIEW_TARGET)
+  const cellView = viewOf(cell, VIEW_TARGET)
   assert.ok(cellView.sx > frameView.sx * 3,
     `the closer view is only ${(cellView.sx / frameView.sx).toFixed(1)}x the frame`)
+  // A block that spans most of the picture is never coarser than the picture.
+  const blockView = viewOf(cellsRegion(frame(), gridFor(frame()), 'B1-I3'), VIEW_TARGET)
+  assert.ok(blockView.sx >= frameView.sx,
+    `a block came back at ${(blockView.sx / frameView.sx).toFixed(2)}x the frame`)
 
   const drawn = await renderRegion(src.bytes, emptyRecord('a.png'), cell, { target: 900, bounds: src })
   assert.deepEqual(drawn.region, cell, 'the drawn region is what the handle names')
@@ -292,6 +312,19 @@ test('looking closer keeps that cell as the handle', async () => {
   })
   const closer = parseRegion(looked.result.view)
   assert.deepEqual(parseRegion(deeper.result.view), cellRegion(closer, gridFor(closer), 'A1'))
+})
+
+test('a block of cells comes back as one view of that block', async () => {
+  const src = await source()
+  const looked = await planLook({
+    record: emptyRecord('a.png'),
+    args: { image: 'a.png', view: token(), cell: 'a1-c4' },
+    loadSource: async () => src
+  })
+  assert.deepEqual(parseRegion(looked.result.view), cellsRegion(frame(), gridFor(frame()), 'A1-C4'))
+  assert.equal(looked.views[0].name, 'block-A1-C4-a.png')
+  assert.equal(looked.views[0].label, 'A1-C4')
+  assert.match(looked.result.grid, /^[0-9]+x[0-9]+ [A-Z]+-[A-Z]+ 1-[0-9]+$/)
 })
 
 test('marking needs the view it was shown, and comes back with the record', async () => {

@@ -49,9 +49,11 @@ locale files are this package's own. Node `^22.19.0 || >=24.0.0`.
    allows — a wide picture gets more columns than rows — and every cell has a name
    like `C3`. The grid follows the picture's aspect ratio rather than a fixed count
    per axis.
-3. **Look closer by naming a cell.** `vision_look` with a cell returns that cell
-   as a new view with a finer grid of its own, so one face in a crowd is read by
-   looking at it twice rather than by estimating a coordinate.
+3. **Look closer by naming cells.** `vision_look` with a cell — `C3` — returns
+   that cell as a new view with a finer grid of its own, so one face in a crowd is
+   read by looking twice rather than by estimating a coordinate. A *block* of cells,
+   `B1-I3`, brings back that whole band in one view, which is how a row of faces is
+   read without a dozen separate looks.
 4. **Mark the cell.** A mark is placed at the centre of the cell the model named,
    with a size it can see (`s`, `m`, `l`), a caption and a colour. The picture comes
    back with the ring on it, plus the record.
@@ -91,6 +93,9 @@ withholding a picture over a failed lookup costs more than it protects.
 - Cell lines are drawn 2 pixels wide at minimum and scale with the view, because a
   one-pixel line is gone by the time the attachment pipeline has re-encoded the
   picture.
+- A view is rendered at one size whatever it covers, so looking closer is never
+  coarser than the whole picture: a block that spans most of the frame comes back at
+  the frame's resolution, and a single cell comes back magnified.
 - Marks are drawn only when asked for, so what is being read is the picture.
 - A comparison sheet is the only way to put several places in one picture, and it
   exists because pictures received separately cannot be compared.
@@ -101,8 +106,8 @@ withholding a picture over a failed lookup costs more than it protects.
 ## Limitations
 
 - **A cell is as fine as the view that carries it.** Marking something smaller than
-  a cell means looking at the cell first; a mark is placed at the cell's centre, not
-  at a point inside it.
+  a cell means looking closer at it first; a mark is placed at the cell's centre, not
+  at a point inside it, and a mark names one cell rather than a block.
 - **A record belongs to the session that made it.** A subagent sees the marks of
   the session it was forked from; its parent does not see the subagent's. Two
   agents need one session to share a record.

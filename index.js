@@ -127,8 +127,8 @@ const MARK_ITEM_SCHEMA = {
   properties: {
     cell: {
       type: 'string',
-      description: 'The cell you can see it in, read off the grid — `C3`. Look closer first if a cell is ' +
-        'too coarse to tell one thing from its neighbour.'
+      description: 'The one cell you can see it in, read off the grid — `C3`. Look closer first if a cell ' +
+        'is too coarse to tell one thing from its neighbour.'
     },
     size: SIZE_PARAMETER,
     caption: { type: 'string', description: 'A few words drawn beside the number, e.g. "half hidden".' },
@@ -402,8 +402,9 @@ export function apply(ctx) {
     name: 'vision_look',
     description:
       'Look at the picture: all of it, or one cell of it closer. Start here — nothing can be marked on a ' +
-      'view you have not been shown. `cell` takes you one level in, and looking again inside the new view ' +
-      'takes you another, which is how one face in a crowd is finally read. The picture comes back with a ' +
+      'view you have not been shown. `cell` takes you one level in — a cell ("C3") or a block of them ' +
+      '("A1-C4") — and looking again inside the new view takes you another, which is how one face in a crowd ' +
+      'is finally read; a view is never coarser than the whole picture. The picture comes back with a ' +
       'grid whose letters and numbers are on all four edges; the result names the view handle to copy ' +
       'back. It is drawn without your marks unless you ask for `marks: true`; `compare` puts marks side by ' +
       'side to ask "is this one thing or two"; `cover` paints a colour out, so whatever still shows has ' +
@@ -421,8 +422,8 @@ export function apply(ctx) {
         },
         cell: {
           type: 'string',
-          description: 'The cell of that view to look at closer, e.g. "C3". Omit it to look at the view as ' +
-            'it is.'
+          description: 'The part of that view to look at closer: a cell, "C3", or a block of cells, "A1-C4", ' +
+            'for a band of them. Omit it to look at the view as it is.'
         },
         marks: {
           type: 'boolean',

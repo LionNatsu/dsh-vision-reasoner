@@ -30,9 +30,16 @@ what makes a call replayable and a handle stable across a restart.
   `cols = clamp(round(sqrt(70 · width / height)), 2, 26)`, `rows = round(70 / cols)`.
   A wide view gets more columns than rows, a tall view the reverse, and the cells
   stay close to square whatever the aspect ratio is.
+- A caller names one cell (`C3`) or a block of them (`A1-C4`); both are read off the
+  grid and checked against it. The block exists because a band of a picture — a row
+  of faces — is not one cell, and a caller that cannot name it goes looking for
+  another way to crop.
 - A cell is a whole-pixel rectangle inside the view. `placeOn` returns its centre:
   a caller names what it can see, and the conversion is the only place picture
-  coordinates are produced.
+  coordinates are produced. A mark names one cell; a block is for looking at.
+- Every view is rendered at the same longest side (`VIEW_TARGET`), so a view of a
+  large region is never coarser than the view of the whole picture, and a view of one
+  cell is magnified until `MAX_CLOSE_SCALE`.
 - A ring size is a fraction of the view's shorter side (`s` 2%, `m` 5%, `l` 12%), so
   a size looks the same to the reader whatever the view is.
 - `MAX_VIEW_DIMENSION` caps every view, sheets included.
