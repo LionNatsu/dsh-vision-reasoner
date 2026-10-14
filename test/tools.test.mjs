@@ -3,8 +3,8 @@
  *
  * Checks what needs no running DSH process: every returned value satisfies its
  * declared output schema (the registry rejects a mismatch at dispatch), the record
- * really is a fold, marking cannot skip the look that gives it a view, and the
- * failure paths report rather than throw.
+ * really is a fold, a place is named in the picture's own pixels, and the failure
+ * paths report rather than throw.
  *
  * The stand-in is deliberately literal — a session is a list of events, the
  * filesystem reads one file — so a test fails when the plugin's assumptions about
@@ -189,21 +189,26 @@ test('the plugin declares what the harness needs to mount it', () => {
   assert.deepEqual(inject, ['tools', 'fs'])
 })
 
-test('the surface is four verbs, and marking cannot skip the look', () => {
+test('the surface is four verbs, and a place is named in the picture\'s own pixels', () => {
   const harness = fakeHarness()
   assert.deepEqual([...harness.tools.keys()].sort(),
     ['vision_edit', 'vision_look', 'vision_mark', 'vision_unmark'])
   assert.equal(harness.tools.has('vision_list'), false, 'the record comes back with every call')
-  assert.equal(harness.tools.has('vision_update'), false)
 
   const mark = harness.tools.get('vision_mark')
-  assert.deepEqual(mark.parameters.required, ['image', 'view', 'marks'], 'the view is not optional')
+  assert.deepEqual(mark.parameters.required, ['image', 'marks'], 'there is no handle to copy back')
+  assert.equal(mark.parameters.properties.view, undefined, 'a view handle is not part of a call')
+  assert.equal(mark.parameters.properties.marks.items.required[0], 'at')
   assert.match(mark.description, /LOOK FIRST/)
-  assert.match(mark.description, /look closer/i, 'and the way to get a finer place is to say so')
+
+  const look = harness.tools.get('vision_look')
+  assert.match(look.description, /ORIGINAL image pixels/)
+  assert.match(look.description, /nothing is scaled/, 'a caller never converts a scale')
+  assert.match(look.description, /only ruler/, 'and does not read positions off another view')
+  assert.equal(look.parameters.required.includes('view'), false)
 
   const edit = harness.tools.get('vision_edit')
   assert.match(edit.description, /vision_unmark/, 'deleting is pointed at its own verb')
-  assert.match(harness.tools.get('vision_look').description, /nothing can be marked on a view you have not been shown/)
 })
 
 test('the client half claims a row for every tool', () => {
@@ -221,20 +226,16 @@ test('every tool value satisfies its own declared output schema', async (t) => {
   const { imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
   const session = fakeSession()
-  const looked = await committedCall(harness, 'vision_look', { image: imagePath }, session, 'look-1')
-  const view = looked.value.view
+  await committedCall(harness, 'vision_look', { image: imagePath }, session, 'look-1')
   await committedCall(harness, 'vision_mark',
-    { image: imagePath, view, marks: [{ cell: 'C3', caption: 'one' }, { cell: 'D4' }] },
+    { image: imagePath, marks: [{ at: [200, 200], caption: 'one' }, { at: [300, 260] }] },
     session, 'seed-1')
 
   const calls = [
-    ['vision_mark', { image: imagePath, view, marks: [{ cell: 'G5', size: 'l' }] }],
-    ['vision_edit', { image: imagePath, view, ops: [{ id: 1, move: 'B2', colour: 'yellow' }] }],
+    ['vision_mark', { image: imagePath, marks: [{ at: [700, 500], size: 'l' }] }],
+    ['vision_edit', { image: imagePath, ops: [{ id: 1, move: [640, 480], colour: 'yellow' }] }],
     ['vision_unmark', { image: imagePath, marks: [1] }],
-    ['vision_look', { image: imagePath, view, cell: 'C3', marks: true }],
-    // A block carries its own kind; leaving it out of the declared enum made every
-    // block look fail the registry's check and reach the model as an error.
-    ['vision_look', { image: imagePath, view, cell: 'A1-B2' }],
+    ['vision_look', { image: imagePath, region: [100, 100, 500, 400], marks: true }],
     ['vision_look', { image: imagePath, compare: [2] }],
     ['vision_look', { image: imagePath, cover: 'green' }]
   ]
@@ -261,7 +262,6 @@ test('the record is a fold: a committed call counts, a failed one does not', asy
   const { imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
   const session = fakeSession()
-  const view = (await call(harness, 'vision_look', { image: imagePath }, session)).value.view
 
   // The harness commits the call BEFORE dispatch, and the result after it.
   session.append('tool/call', {
@@ -269,14 +269,16 @@ test('the record is a fold: a committed call counts, a failed one does not', asy
     step: 1,
     callId: 'call-1',
     name: 'vision_mark',
-    arguments: JSON.stringify({ image: imagePath, view, marks: [{ cell: 'A1' }, { cell: 'B2' }] })
+    arguments: JSON.stringify({ image: imagePath, marks: [{ at: [100, 120] }, { at: [200, 240] }] })
   })
-  const first = await call(harness, 'vision_mark', { image: imagePath, view, marks: [{ cell: 'A1' }, { cell: 'B2' }] }, session)
+  const first = await call(harness, 'vision_mark',
+    { image: imagePath, marks: [{ at: [100, 120] }, { at: [200, 240] }] }, session)
   assert.deepEqual(first.value.marked, [1, 2], 'the live call sees its own numbering')
 
   // Until the result lands, the record has not changed...
   const before = await call(harness, 'vision_look', { image: imagePath }, session)
   assert.equal(before.value.marks, 0, 'a pending call has not committed')
+
   session.append('tool/result', {
     turn: 1,
     step: 1,
@@ -284,7 +286,7 @@ test('the record is a fold: a committed call counts, a failed one does not', asy
   })
   const after = await call(harness, 'vision_look', { image: imagePath }, session)
   assert.equal(after.value.marks, 2, 'the committed result is the record')
-  assert.deepEqual(after.value.record, ['#1 A1 green', '#2 B2 green'])
+  assert.deepEqual(after.value.record, ['#1 100,120 green', '#2 200,240 green'])
 
   // A call that failed changes nothing, even though its arguments were logged.
   session.append('tool/call', {
@@ -292,7 +294,7 @@ test('the record is a fold: a committed call counts, a failed one does not', asy
     step: 2,
     callId: 'call-2',
     name: 'vision_mark',
-    arguments: JSON.stringify({ image: imagePath, view, marks: [{ cell: 'C3' }] })
+    arguments: JSON.stringify({ image: imagePath, marks: [{ at: [300, 300] }] })
   })
   session.append('tool/result', {
     turn: 1,
@@ -309,7 +311,7 @@ test('the record is a fold: a committed call counts, a failed one does not', asy
     step: 3,
     callId: 'call-3',
     name: 'vision_mark',
-    arguments: JSON.stringify({ image: imagePath, view, marks: [{ cell: 'D4' }] })
+    arguments: JSON.stringify({ image: imagePath, marks: [{ at: [400, 400] }] })
   })
   session.append('turn/end', { turn: 1, reason: { kind: 'interrupted' } })
   const dropped = await call(harness, 'vision_look', { image: imagePath }, session)
@@ -321,7 +323,7 @@ test('the record is a fold: a committed call counts, a failed one does not', asy
     step: 1,
     callId: 'call-4',
     name: 'vision_edit',
-    arguments: JSON.stringify({ image: imagePath, view, ops: [{ id: 1, move: 'J7', caption: 'moved on' }] })
+    arguments: JSON.stringify({ image: imagePath, ops: [{ id: 1, move: [640, 480], caption: 'moved on' }] })
   })
   session.append('tool/result', {
     turn: 2,
@@ -329,7 +331,7 @@ test('the record is a fold: a committed call counts, a failed one does not', asy
     message: { role: 'tool', toolCallId: 'call-4', isError: false }
   })
   const edited = await call(harness, 'vision_look', { image: imagePath }, session)
-  assert.deepEqual(edited.value.record, ['#1 J7 green "moved on"', '#2 B2 green'])
+  assert.deepEqual(edited.value.record, ['#1 640,480 green "moved on"', '#2 200,240 green'])
 
   session.append('tool/call', {
     turn: 3,
@@ -344,7 +346,27 @@ test('the record is a fold: a committed call counts, a failed one does not', asy
     message: { role: 'tool', toolCallId: 'call-5', isError: false }
   })
   const unmarked = await call(harness, 'vision_look', { image: imagePath }, session)
-  assert.deepEqual(unmarked.value.record, ['#2 B2 green'], 'a removed mark is gone from the replayed record')
+  assert.deepEqual(unmarked.value.record, ['#2 200,240 green'], 'a removed mark is gone from the replayed record')
+})
+
+test('the picture comes back around what was just marked', async (t) => {
+  const { imagePath } = await fixture(t)
+  const harness = fakeHarness({ imagePath })
+  const session = fakeSession()
+
+  // Two places close together: the answer is a rectangle of the picture, so the
+  // caller sees what it just did without asking to look closer.
+  const near = await call(harness, 'vision_mark',
+    { image: imagePath, marks: [{ at: [200, 200] }, { at: [260, 260] }] }, session)
+  assert.equal(near.value.region, '149,149,311,311')
+  assert.equal(near.value.views[0].kind, 'crop')
+
+  // Places spread across the picture: the whole picture, because a rectangle
+  // around them would be the picture anyway.
+  const far = await call(harness, 'vision_mark',
+    { image: imagePath, marks: [{ at: [80, 80] }, { at: [720, 520] }] }, session)
+  assert.equal(far.value.region, '0,0,800,600')
+  assert.equal(far.value.views[0].kind, 'frame')
 })
 
 test('a picture is attached, and its path is reported when the backend has one', async (t) => {
@@ -366,7 +388,8 @@ test('a picture is attached, and its path is reported when the backend has one',
   assert.equal(content[1].type, 'image')
   assert.equal(content[1].attachment.attachmentId, 'attachment-1')
   assert.match(content[0].text, /no marks yet/)
-  assert.match(content[0].text, new RegExp(`view ${value.view} \\(copy this as "view"\\) — grid 10x7 A-J 1-7, marks drawn`))
+  assert.match(content[0].text, /\(800x600\)/, 'the picture\'s own size, in original pixels')
+  assert.match(content[0].text, /view 0,0,800,600 — grid every 100 original pixels, marks drawn/)
   assert.match(content[0].text, /saved as \.dsh-vision\/frame-photo\.png \(1400x1050\)/)
 })
 
@@ -398,9 +421,8 @@ test('a picture that cannot be stored is reported, and the record survives it', 
   const { dir, imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath, storeFails: true })
   const session = fakeSession(dir)
-  const view = (await call(harness, 'vision_look', { image: imagePath }, session)).value.view
   const { value, content } = await call(harness, 'vision_mark',
-    { image: imagePath, view, marks: [{ cell: 'C3' }] }, session)
+    { image: imagePath, marks: [{ at: [400, 300] }] }, session)
   // The record change happened and is durable; only the picture was lost.
   assert.deepEqual(value.marked, [1])
   assert.equal(value.marks, 1)
@@ -435,7 +457,7 @@ test('a caller with no session is refused, not silently ignored', async (t) => {
     /needs an owning agent session/
   )
   await assert.rejects(
-    () => call(harness, 'vision_mark', { image: imagePath, view: '0,0,800,600', marks: [{ cell: 'A1' }] }, undefined),
+    () => call(harness, 'vision_mark', { image: imagePath, marks: [{ at: [10, 10] }] }, undefined),
     /needs an owning agent session/
   )
 })
@@ -444,18 +466,17 @@ test('the arguments the model can send are the only ones accepted', async (t) =>
   const { imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
   const session = fakeSession()
-  const view = (await call(harness, 'vision_look', { image: imagePath }, session)).value.view
 
   await assert.rejects(
-    () => call(harness, 'vision_mark', { image: imagePath, marks: [{ cell: 'A1' }] }, session),
-    /this call needs "view"/
+    () => call(harness, 'vision_mark', { image: imagePath, marks: [{ size: 'm' }] }, session),
+    /at must be \[x, y\] in original pixels/
   )
   await assert.rejects(
-    () => call(harness, 'vision_mark', { image: imagePath, view, marks: [{ cell: 'Z9' }] }, session),
-    /outside this view, which is 10x7 A-J 1-7/
+    () => call(harness, 'vision_mark', { image: imagePath, marks: [{ at: [900, 100] }] }, session),
+    /outside the picture, which is 800x600 original pixels/
   )
   await assert.rejects(
-    () => call(harness, 'vision_mark', { image: imagePath, view, marks: [{ cell: 'A1', size: 'xl' }] }, session),
+    () => call(harness, 'vision_mark', { image: imagePath, marks: [{ at: [10, 10], size: 'xl' }] }, session),
     /size must be one of s, m, l/
   )
   await assert.rejects(
@@ -467,15 +488,15 @@ test('the arguments the model can send are the only ones accepted', async (t) =>
     /no mark #99/
   )
   await assert.rejects(
-    () => call(harness, 'vision_edit', { image: imagePath, ops: [{ id: 1, move: 'A1' }] }, session),
-    /this call needs "view"/
+    () => call(harness, 'vision_edit', { image: imagePath, ops: [{ id: 1, move: ['A1'] }] }, session),
+    /move must be \[x, y\] in original pixels/
   )
   await assert.rejects(
     () => call(harness, 'vision_look', { image: imagePath, cover: 'chartreuse' }, session),
     /unknown colour\(s\) chartreuse/
   )
   await assert.rejects(
-    () => call(harness, 'vision_look', { image: imagePath, view, cell: 'Z9' }, session),
-    /outside this view/
+    () => call(harness, 'vision_look', { image: imagePath, region: ['a', 'b', 'c', 'd'] }, session),
+    /region must be four numbers in original pixels/
   )
 })

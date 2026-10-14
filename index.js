@@ -59,7 +59,7 @@ const VIEW_VALUE_SCHEMA = {
   additionalProperties: false,
   required: ['kind', 'name', 'width', 'height'],
   properties: {
-    kind: { type: 'string', enum: ['frame', 'cell', 'block', 'compare', 'cover'] },
+    kind: { type: 'string', enum: ['frame', 'crop', 'compare', 'cover'] },
     name: { type: 'string' },
     label: { type: 'string' },
     width: { type: 'integer' },
@@ -67,14 +67,19 @@ const VIEW_VALUE_SCHEMA = {
   }
 }
 
-/** What every call reports: the record it changed, and the view it is looking at. */
+/** What every call reports: the record it changed, and the rectangle it drew. */
 const PICTURE_RESULT_PROPERTIES = {
-  view: {
+  picture: { type: 'string', required: true, description: 'The picture\'s size in original pixels, `2600x1831`.' },
+  region: {
     type: 'string',
     required: true,
-    description: 'Handle of the view this call is looking at; copy it back as `view`.'
+    description: 'The rectangle drawn, `0,0,2600,1831`, in original pixels.'
   },
-  grid: { type: 'string', required: true, description: 'The view\'s cells, as `10x7 A-J 1-7`.' },
+  step: {
+    type: 'integer',
+    required: true,
+    description: 'The grid step in original pixels (0 when the picture carries no grid).'
+  },
   marksShown: { type: 'boolean', required: true },
   record: { type: 'array', required: true, items: { type: 'string' } },
   views: { type: 'array', required: true, items: VIEW_VALUE_SCHEMA },
@@ -106,30 +111,33 @@ const IMAGE_PARAMETER = {
   description: 'Path to the picture. A relative path resolves against the session working directory.'
 }
 
-const VIEW_PARAMETER = {
-  type: 'string',
-  description: 'The `view` handle copied verbatim from the result you are looking at. It names the picture, ' +
-    'or the part of it, that was drawn for you. Never write one yourself: to look at another part, call ' +
-    'vision_look.'
+const REGION_PARAMETER = {
+  type: 'array',
+  items: { type: 'integer' },
+  description: 'The rectangle to look at, `[x0, y0, x1, y1]` in original image pixels, read off the labelled ' +
+    'grid lines. Leave it out for the whole picture; give a small one to read a face closely.'
+}
+
+const AT_PARAMETER = {
+  type: 'array',
+  items: { type: 'integer' },
+  description: 'The place you read off the grid, `[x, y]` in original image pixels, estimated between the ' +
+    'labelled lines.'
 }
 
 const SIZE_PARAMETER = {
   type: 'string',
   enum: ['s', 'm', 'l'],
-  description: 'How big the ring is drawn, as it looks on the view you are marking on: s for one face in ' +
-    'a crowd, m for a person, l for a group or a large area.'
+  description: 'How big the ring is drawn, in the picture\'s own pixels: s is 60 px across for one face in a ' +
+    'crowd, m is 120 px for a person, l is 240 px for a group or a large area.'
 }
 
 const MARK_ITEM_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['cell'],
+  required: ['at'],
   properties: {
-    cell: {
-      type: 'string',
-      description: 'The one cell you can see it in, read off the grid — `C3`. The ring is drawn at the ' +
-        'centre of that cell, so look closer until the cell is about the size of the thing you are marking.'
-    },
+    at: AT_PARAMETER,
     size: SIZE_PARAMETER,
     caption: { type: 'string', description: 'A few words drawn beside the number, e.g. "half hidden".' },
     colour: { type: 'string', enum: COLOUR_NAMES, description: `Its meaning is yours. Default ${DEFAULT_COLOUR}.` }
@@ -142,10 +150,7 @@ const OP_ITEM_SCHEMA = {
   required: ['id'],
   properties: {
     id: { type: 'integer', description: 'The number drawn on the picture.' },
-    move: {
-      type: 'string',
-      description: 'The cell of the current view the mark belongs in, read off its grid.'
-    },
+    move: { ...AT_PARAMETER, description: 'Where the mark belongs: `[x, y]` in original image pixels.' },
     size: SIZE_PARAMETER,
     caption: { type: 'string', description: 'New caption; "" clears it.' },
     colour: { type: 'string', enum: COLOUR_NAMES, description: 'New colour.' }
@@ -401,31 +406,22 @@ export function apply(ctx) {
   ctx.tools.register({
     name: 'vision_look',
     description:
-      'Look at the picture: all of it, or one cell of it closer. Start here — nothing can be marked on a ' +
-      'view you have not been shown. `cell` takes you one level in — a cell ("C3") or a block of them ' +
-      '("A1-C4") — and looking again inside the new view takes you another, which is how one face in a crowd ' +
-      'is finally read; a view is never coarser than the whole picture. The picture comes back with a ' +
-      'grid whose letters and numbers are on all four edges; the result names the view handle to copy ' +
-      'back. This grid is the only ruler here: do not crop the picture with another tool, and do not read ' +
-      'a position off any other view of it, whose pixels are a different size. It is drawn without your ' +
-      'marks unless you ask for `marks: true`; `compare` puts marks side by side to ask "is this one ' +
-      'thing or two"; `cover` paints a colour out, so whatever still shows has not been marked.',
+      'Look at the picture: all of it, or a rectangle of it. Every grid line is labelled with its position ' +
+      'in ORIGINAL image pixels — the picture\'s top-left corner is 0,0 — so a number you read is a number ' +
+      'you can use: nothing is scaled, and nothing has to be converted. Start here; a place is named from ' +
+      'what you have seen. `region` is [x0, y0, x1, y1] read off those labels: leave it out for the whole ' +
+      'picture, give a small one to read a face closely. This grid is the only ruler — do not crop the ' +
+      'picture with another tool, and do not read a position off another view of it, whose pixels are a ' +
+      'different size. The picture is drawn without your marks unless you ask for `marks: true`; `compare` ' +
+      'puts marks side by side to ask "is this one thing or two"; `cover` paints a colour out, so whatever ' +
+      'still shows has not been marked.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       required: ['image'],
       properties: {
         image: IMAGE_PARAMETER,
-        view: {
-          type: 'string',
-          description: 'The handle of the view to look at, copied from an earlier result. Omit it for the ' +
-            'whole picture.'
-        },
-        cell: {
-          type: 'string',
-          description: 'The part of that view to look at closer: a cell, "C3" (column C, row 3), or a block ' +
-            'of cells, "A1-C4", for a band of them. Omit it to look at the view as it is.'
-        },
+        region: REGION_PARAMETER,
         marks: {
           type: 'boolean',
           description: 'Draw the marks on the picture (default false: the picture is what is being read).'
@@ -454,7 +450,7 @@ export function apply(ctx) {
         ? `Compare ${args.compare.map((id) => `#${id}`).join(' ')}`
         : args.cover !== undefined
           ? `Cover ${args.cover}`
-          : args.cell !== undefined ? `Look closer at ${args.cell}` : `Look at ${args.image}`,
+          : Array.isArray(args.region) ? `Look at ${args.region.join(',')}` : `Look at ${args.image}`,
       kind: 'read',
       locations: [{ path: args.image }]
     })
@@ -463,22 +459,21 @@ export function apply(ctx) {
   ctx.tools.register({
     name: 'vision_mark',
     description:
-      'Mark places on the picture, one cell at a time. LOOK FIRST: `view` is the handle of the view you ' +
-      'were just shown and `cell` is a square of its grid, so a mark is placed by what you can see, never ' +
-      'by a coordinate you work out — and a picture you have not looked at with vision_look cannot be ' +
-      'marked at all. If a cell is too coarse to tell one thing from its neighbour, look closer at it ' +
-      'first and mark in the closer view. Mark a few places, read the picture that comes back, then ' +
-      'continue; the whole record is listed in every result, so double marks and mistakes show up as you ' +
-      'go. A mark that is nearly right is moved by vision_edit, a wrong one is deleted by vision_unmark, ' +
-      'and cover shows what is still unmarked. Nothing here counts or judges what the picture holds — that ' +
-      'is your statement to make.',
+      'Mark places on the picture by their original-image coordinates: `at` is [x, y] in ORIGINAL pixels, ' +
+      'read off the labelled grid lines and estimated between them. LOOK FIRST — mark what you have seen ' +
+      'in a vision_look picture, never a position worked out from anywhere else. Mark a few places, read ' +
+      'the picture that comes back (it comes back around what you just marked), then continue: every ' +
+      'mark\'s coordinates are listed in every result, so a double mark or a wrong one is visible at once. ' +
+      '`size` is the ring you judged by eye — s for one face in a crowd, m for a person, l for a group. A ' +
+      'mark that is nearly right is moved by vision_edit, a wrong one is deleted by vision_unmark, and ' +
+      'cover shows what is still unmarked. Nothing here counts or judges what the picture holds — that is ' +
+      'your statement to make.',
     parameters: {
       type: 'object',
       additionalProperties: false,
-      required: ['image', 'view', 'marks'],
+      required: ['image', 'marks'],
       properties: {
         image: IMAGE_PARAMETER,
-        view: VIEW_PARAMETER,
         marks: {
           type: 'array',
           items: MARK_ITEM_SCHEMA,
@@ -541,17 +536,16 @@ export function apply(ctx) {
   ctx.tools.register({
     name: 'vision_edit',
     description:
-      'Correct marks that are nearly right: move one into the cell it belongs in, resize it, recaption or ' +
-      'recolour it. One call takes many operations, so a round of corrections is one call. Moving or ' +
-      'resizing happens in the view you are looking at, so those need its `view` handle and a cell of its ' +
-      'grid. To take a wrong mark out, use vision_unmark. The picture comes back, with the record.',
+      'Correct marks that are nearly right: move one to the place it belongs in, resize it, recaption or ' +
+      'recolour it. `move` is [x, y] in ORIGINAL pixels, read off the labelled grid lines. One call takes ' +
+      'many operations, so a round of corrections is one call. The picture comes back around what you ' +
+      'changed, with the record. To take a wrong mark out, use vision_unmark.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       required: ['image', 'ops'],
       properties: {
         image: IMAGE_PARAMETER,
-        view: VIEW_PARAMETER,
         ops: { type: 'array', items: OP_ITEM_SCHEMA, description: 'The operations, applied in order.' }
       }
     },

@@ -4,15 +4,15 @@
 
 | Path | Role |
 |---|---|
-| `index.js` | Host half: registers the four tools, folds each record from the session log, stores the rendered views |
-| `lib/views.js` | The geometry a caller reads: a view's grid, a cell, the place a cell names — all pure |
-| `lib/record.js` | The mark record, the only two functions that change it, and the conversion from a call's arguments to those functions |
+| `index.js` | Host half: registers the four tools, folds each record from the session log, stores the rendered pictures |
+| `lib/views.js` | The geometry a caller reads: a grid's step, the places on it, the rectangle a call means — all pure |
+| `lib/record.js` | The mark record, the only functions that change it, and the conversion from a call's arguments to those functions |
 | `lib/core.js` | One call: validate, change the record, decide what to draw, write the text the caller reads |
 | `lib/draw.js` | The overlays, as SVG strings (pure) |
 | `lib/render.js` | A region of the picture, plus its overlay, as a PNG through `sharp`; also header-only dimensions |
 | `lib/client.js` | Browser half: one transcript row per tool name |
 
-`views.js` knows only grids and rectangles, `record.js` knows only marks,
+`views.js` knows only pixels and rectangles, `record.js` knows only marks,
 `render.js` is the only module that touches pixels, `core.js` decides what a call
 means, `index.js` talks to the harness, and `client.js` runs in the browser.
 
@@ -20,28 +20,24 @@ means, `index.js` talks to the harness, and `client.js` runs in the browser.
 already uses `sharp` for every image a session attaches
 (`@deepseek-ai/dsh-attachment-local` depends on it).
 
-## Views
+## The grid and the places
 
-A view is a rectangle of the picture, rendered at a size this package chooses. The
-rectangle *is* the caller's handle for it — `x0,y0,x1,y1`, digits only — which is
-what makes a call replayable and a handle stable across a restart.
+A grid is drawn at multiples of a round step of the picture's own pixels, and every
+line is labelled with that number on all four edges. Nothing in a call is expressed
+in the terms of an earlier view: a place is a pair of original pixels, which is what
+makes a call replayable, a number portable between views, and a position independent
+of how closely the picture is being looked at.
 
-- The grid is derived from the rectangle's shape, not from a count per axis:
-  `cols = clamp(round(sqrt(70 · width / height)), 2, 26)`, `rows = round(70 / cols)`.
-  A wide view gets more columns than rows, a tall view the reverse, and the cells
-  stay close to square whatever the aspect ratio is.
-- A caller names one cell (`C3`) or a block of them (`A1-C4`); both are read off the
-  grid and checked against it. The block exists because a band of a picture — a row
-  of faces — is not one cell, and a caller that cannot name it goes looking for
-  another way to crop.
-- A cell is a whole-pixel rectangle inside the view. `placeOn` returns its centre:
-  a caller names what it can see, and the conversion is the only place picture
-  coordinates are produced. A mark names one cell; a block is for looking at.
-- Every view is rendered at the same longest side (`VIEW_TARGET`), so a view of a
-  large region is never coarser than the view of the whole picture, and a view of one
-  cell is magnified until `MAX_CLOSE_SCALE`.
-- A ring size is a fraction of the view's shorter side (`s` 2%, `m` 5%, `l` 12%), so
-  a size looks the same to the reader whatever the view is.
+- The step is the coarsest of `10, 20, 50, 100, 200, 500, …` whose lines are still
+  about a hundred view pixels apart (`MIN_LABEL_SPACING`). A closer view therefore
+  steps finer without changing what a number means, and two axes of the same view
+  always agree because the step is one number.
+- Every view is rendered at the same longest side (`VIEW_TARGET`), so a rectangle of
+  the picture is never coarser than the whole picture, and a small one is magnified
+  until `MAX_CLOSE_SCALE`.
+- A ring size is a number of original pixels (`s` 30, `m` 60, `l` 120 radius), not a
+  fraction of the view: a size that depended on the view would make a replayed call
+  depend on what the caller happened to be looking at.
 - `MAX_VIEW_DIMENSION` caps every view, sheets included.
 - Line widths have a floor of 2-3 pixels and scale with the view: the attachment
   pipeline re-encodes a view, and hairlines do not survive it.
@@ -62,7 +58,8 @@ independently.
 ```
 
 A mark is addressed by the number drawn on the picture: `#17`. The record is the
-only place a place is a picture coordinate; no caller ever sends one.
+only place a place is a picture coordinate; a caller sends one, and gets every one
+back in the list beside each picture.
 
 The record is a fold of the session log, and nothing else is stored:
 
@@ -73,9 +70,13 @@ The record is a fold of the session log, and nothing else is stored:
 
 The fold replays a call through the same `marksFromArgs` / `opsFromArgs` the live
 call used, so a rebuilt record is the record the model was working with. It needs no
-state of its own: a call's own arguments carry the view handle it was placed on, and
-a handle is a rectangle. Reads are incremental: only the events appended since the
-last read are folded, cached per session id.
+state of its own, and no picture: a place is a pair of pixels and a size is a number
+of pixels, so there is nothing to measure. The live path passes the picture's
+dimensions only to refuse a place outside it, which is a refusal, not a value — a
+call that was refused never committed, so the two paths cannot disagree.
+
+Reads are incremental: only the events appended since the last read are folded,
+cached per session id.
 
 No event type of our own is used, because `Session.append` cannot set the
 `ignorable` envelope marker and `@deepseek-ai/dsh-session`'s read path refuses a log
@@ -108,15 +109,17 @@ the marks are committed by then.
 
 | Tool | Behaviour |
 |---|---|
-| `vision_look` | The whole picture, or one cell of a view closer, or several marks side by side, or a colour painted out. Answers a handle and a grid; draws the marks only when asked |
-| `vision_mark` | Adds marks at the centres of the cells named, numbered in the order given. Requires the view it was shown |
+| `vision_look` | The whole picture, a rectangle of it, several marks side by side, or a colour painted out. Draws the marks only when asked |
+| `vision_mark` | Adds marks at the coordinates given, numbered in the order given |
 | `vision_unmark` | Deletes marks by number, through the same removal operation as `vision_edit` |
 | `vision_edit` | Moves, resizes, recaptions or recolours marks by number; one call takes many operations |
 
-Every result carries the same five things: the picture, the handle (`view`), the
-grid's name, whether the marks are drawn, and the whole record as one line per mark
-named by a cell of the whole picture's grid. `vision_list` is not a tool because a
-caller should never have to ask what it has already been told.
+Every result carries the same things: the picture's size, the rectangle drawn, the
+grid's step, whether the marks are drawn, and the whole record as one line per mark
+with its coordinates. A mark and a move report the picture drawn *around what was
+just changed*, so the caller sees the result of its own change without a second
+look — the whole picture when the change is spread across it. `vision_list` is not a
+tool because a caller should never have to ask what it has already been told.
 
 `vision_mark`, `vision_unmark` and `vision_edit` leave `isConcurrencySafe`
 undeclared, so the registry schedules them exclusively: two calls editing one record

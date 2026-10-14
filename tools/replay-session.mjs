@@ -13,7 +13,8 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { zstdDecompressSync } from 'node:zlib'
 
 import { MUTATING_TOOLS, applyToolArgs, emptyRecord, imageKey, recordSummary } from '../lib/record.js'
-import { frameRegion, prepareSource, probeImageSize, renderRegion } from '../lib/render.js'
+import { VIEW_TARGET, prepareSource, probeImageSize, renderRegion } from '../lib/render.js'
+import { frameRegion } from '../lib/views.js'
 
 const MUTATING = new Set(MUTATING_TOOLS)
 
@@ -145,7 +146,7 @@ if (out !== undefined) {
   const size = await probeImageSize(path)
   const bytes = await prepareSource(readFileSync(path), size.orientation)
   const drawn = await renderRegion(bytes, record, frameRegion(size.width, size.height), {
-    target: 1600,
+    target: VIEW_TARGET,
     showMarks: true,
     bounds: { width: size.width, height: size.height }
   })
