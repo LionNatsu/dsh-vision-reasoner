@@ -13,8 +13,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { zstdDecompressSync } from 'node:zlib'
 
 import { MUTATING_TOOLS, applyToolArgs, emptyRecord, imageKey, recordSummary } from '../lib/record.js'
-import { renderViews } from '../lib/render.js'
-import { probeImageSize } from '../lib/render.js'
+import { frameRegion, prepareSource, probeImageSize, renderRegion } from '../lib/render.js'
 
 const MUTATING = new Set(MUTATING_TOOLS)
 
@@ -144,11 +143,12 @@ if (out !== undefined) {
   if (record === undefined) throw new Error('no record to render')
   const path = record.image
   const size = await probeImageSize(path)
-  const views = await renderViews(
-    { bytes: readFileSync(path), width: size.width, height: size.height, orientation: size.orientation },
-    record,
-    { map: true, target: 1600 }
-  )
-  writeFileSync(out, views[0].png)
-  console.log(`\nrendered ${views[0].width}x${views[0].height} -> ${out}   (record key ${key})`)
+  const bytes = await prepareSource(readFileSync(path), size.orientation)
+  const drawn = await renderRegion(bytes, record, frameRegion(size.width, size.height), {
+    target: 1600,
+    showMarks: true,
+    bounds: { width: size.width, height: size.height }
+  })
+  writeFileSync(out, drawn.png)
+  console.log(`\nrendered ${drawn.width}x${drawn.height} -> ${out}   (record key ${key})`)
 }

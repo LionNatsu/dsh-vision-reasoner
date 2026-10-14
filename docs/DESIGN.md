@@ -4,16 +4,17 @@
 
 | Path | Role |
 |---|---|
-| `index.js` | Host half: registers the five tools, folds each record from the session log, stores the rendered views |
-| `lib/record.js` | The mark record, and the only two functions that change it — both pure |
-| `lib/core.js` | One call: validate, change the record, decide which views to render |
-| `lib/draw.js` | The views, as SVG strings (pure) |
-| `lib/render.js` | SVG over the picture, as PNG, through `sharp`; also header-only dimensions |
+| `index.js` | Host half: registers the four tools, folds each record from the session log, stores the rendered views |
+| `lib/views.js` | The geometry a caller reads: a view's grid, a cell, the place a cell names — all pure |
+| `lib/record.js` | The mark record, the only two functions that change it, and the conversion from a call's arguments to those functions |
+| `lib/core.js` | One call: validate, change the record, decide what to draw, write the text the caller reads |
+| `lib/draw.js` | The overlays, as SVG strings (pure) |
+| `lib/render.js` | A region of the picture, plus its overlay, as a PNG through `sharp`; also header-only dimensions |
 | `lib/client.js` | Browser half: one transcript row per tool name |
 
-`record.js` knows only marks, `draw.js` only shapes and text, `render.js` is the
-only module that touches pixels, `core.js` decides what a call means, `index.js`
-talks to the harness, and `client.js` runs in the browser.
+`views.js` knows only grids and rectangles, `record.js` knows only marks,
+`render.js` is the only module that touches pixels, `core.js` decides what a call
+means, `index.js` talks to the harness, and `client.js` runs in the browser.
 
 `sharp` is the only dependency. Node has no image codec of its own, and the harness
 already uses `sharp` for every image a session attaches
@@ -21,45 +22,53 @@ already uses `sharp` for every image a session attaches
 
 ## Views
 
-A view maps original pixels to view pixels, with two scales because a fitted map
-rounds its two dimensions independently:
+A view is a rectangle of the picture, rendered at a size this package chooses. The
+rectangle *is* the caller's handle for it — `x0,y0,x1,y1`, digits only — which is
+what makes a call replayable and a handle stable across a restart.
+
+- The grid is derived from the rectangle's shape, not from a count per axis:
+  `cols = clamp(round(sqrt(70 · width / height)), 2, 26)`, `rows = round(70 / cols)`.
+  A wide view gets more columns than rows, a tall view the reverse, and the cells
+  stay close to square whatever the aspect ratio is.
+- A cell is a whole-pixel rectangle inside the view. `placeOn` returns its centre:
+  a caller names what it can see, and the conversion is the only place picture
+  coordinates are produced.
+- A ring size is a fraction of the view's shorter side (`s` 2%, `m` 5%, `l` 12%), so
+  a size looks the same to the reader whatever the view is.
+- `MAX_VIEW_DIMENSION` caps every view, sheets included.
+- Line widths have a floor of 2-3 pixels and scale with the view: the attachment
+  pipeline re-encodes a view, and hairlines do not survive it.
+- `applyMarkArgs` and `applyUpdateArgs` throw on bad input rather than repairing it:
+  a record that absorbed a malformed mark would be wrong invisibly.
 
     svg_x = (original_x - view.x0) * view.sx
 
-- Every label is an original-image coordinate or a mark's number; the tick line is
-  the coordinate, and the label is centred on it. A label nudged inwards to stay on
-  the canvas would otherwise misstate the position it names.
-- A close-up draws a crosshair on the address it was asked for, so one position on
-  the tile needs no reading.
-- `MAX_VIEW_DIMENSION` caps every view, sheets included, whatever the caller asks.
-- Line widths have a floor of 2-3 view pixels and scale with the zoom: the
-  attachment pipeline re-encodes a view, and hairlines do not survive it.
-- Coordinates are integers in original pixels. Colour names come from a fixed
-  palette; what they mean is the caller's business.
-- `applyMarkArgs` and `applyUpdateArgs` throw on bad input rather than repairing
-  it: a record that absorbed a malformed mark would be wrong invisibly.
+Two scales rather than one, because a fitted view rounds its two dimensions
+independently.
 
 ## The record
 
 ```json
 { "image": "picture.jpg", "marks": [
-  { "id": 1, "kind": "point", "x": 640, "y": 480, "r": 60, "caption": "", "colour": "green" },
-  { "id": 2, "kind": "box", "x0": 120, "y0": 240, "x1": 360, "y1": 520, "caption": "", "colour": "green" }
+  { "id": 1, "kind": "point", "x": 640, "y": 480, "r": 60, "caption": "", "colour": "green" }
 ] }
 ```
 
-Addresses: `#17` a stored mark, `640,480` a point, `120,240,360,520` a rectangle —
-the number of coordinates decides which of the last two it is.
+A mark is addressed by the number drawn on the picture: `#17`. The record is the
+only place a place is a picture coordinate; no caller ever sends one.
 
 The record is a fold of the session log, and nothing else is stored:
 
-- a `tool/call` for `vision_mark` / `vision_update` is a pending mutation;
+- a `tool/call` for `vision_mark` / `vision_unmark` / `vision_edit` is a pending
+  mutation;
 - its `tool/result` with no `error` commits it, a failed one drops it;
 - a `turn/end` drops anything still pending.
 
-The fold calls the same two pure functions the live call used, so a rebuilt record
-is the record the model was working with. Reads are incremental: only the events
-appended since the last read are folded, cached per session id.
+The fold replays a call through the same `marksFromArgs` / `opsFromArgs` the live
+call used, so a rebuilt record is the record the model was working with. It needs no
+state of its own: a call's own arguments carry the view handle it was placed on, and
+a handle is a rectangle. Reads are incremental: only the events appended since the
+last read are folded, cached per session id.
 
 No event type of our own is used, because `Session.append` cannot set the
 `ignorable` envelope marker and `@deepseek-ai/dsh-session`'s read path refuses a log
@@ -92,15 +101,19 @@ the marks are committed by then.
 
 | Tool | Behaviour |
 |---|---|
-| `vision_mark` | Adds marks, numbered in the order given. `view`: `map` (default) / `marks` |
-| `vision_unmark` | Deletes marks by number, through the same removal operation as `vision_update` |
-| `vision_update` | Moves, recaptions, recolours or removes marks by number; one call takes many operations. `view` defaults to `map` |
-| `vision_show` | No address: the map. One: a close-up. Several: a sheet. `cover` paints given colours out |
-| `vision_list` | The record as text, one line per mark |
+| `vision_look` | The whole picture, or one cell of a view closer, or several marks side by side, or a colour painted out. Answers a handle and a grid; draws the marks only when asked |
+| `vision_mark` | Adds marks at the centres of the cells named, numbered in the order given. Requires the view it was shown |
+| `vision_unmark` | Deletes marks by number, through the same removal operation as `vision_edit` |
+| `vision_edit` | Moves, resizes, recaptions or recolours marks by number; one call takes many operations |
 
-`vision_mark`, `vision_unmark` and `vision_update` leave `isConcurrencySafe`
-undeclared, so the registry schedules them exclusively: two calls editing one record must not
-interleave, or two marks would be handed the same number.
+Every result carries the same five things: the picture, the handle (`view`), the
+grid's name, whether the marks are drawn, and the whole record as one line per mark
+named by a cell of the whole picture's grid. `vision_list` is not a tool because a
+caller should never have to ask what it has already been told.
+
+`vision_mark`, `vision_unmark` and `vision_edit` leave `isConcurrencySafe`
+undeclared, so the registry schedules them exclusively: two calls editing one record
+must not interleave, or two marks would be handed the same number.
 
 ## Reading the picture
 

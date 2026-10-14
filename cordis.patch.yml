@@ -1,6 +1,6 @@
-# One Host row. The plugin registers five model-facing tools (`vision_mark`,
-# `vision_unmark`, `vision_update`, `vision_show`, `vision_list`) over the `tools`
-# service and imports nothing outside this package and Node builtins.
+# One Host row. The plugin registers four model-facing tools (`vision_look`,
+# `vision_mark`, `vision_unmark`, `vision_edit`) over the `tools` service and
+# imports nothing outside this package and Node builtins.
 - insert:
     - id: vision-reasoner
       name: dsh-vision-reasoner

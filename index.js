@@ -1,7 +1,7 @@
 /**
  * dsh-vision-reasoner (Host half).
  *
- * Registers the five tools, keeps each record as a fold of the session log, and
+ * Registers the four tools, keeps each record as a fold of the session log, and
  * stores the rendered views. This file is the wiring; the reasoning is in
  * docs/DESIGN.md.
  *
@@ -12,13 +12,13 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { COLOURS, DEFAULT_COLOUR, MUTATING_TOOLS, applyToolArgs, emptyRecord, imageKey } from './lib/record.js'
-import { planList, planMark, planShow, planUnmark, planUpdate, describe as describeResult } from './lib/core.js'
+import { describe as describeResult, planEdit, planLook, planMark, planUnmark } from './lib/core.js'
 import { probeImageSize } from './lib/render.js'
 
 export const name = 'vision-reasoner'
 
 /**
- * `tools` to register the five tools, `fs` to read the picture through the
+ * `tools` to register the four tools, `fs` to read the picture through the
  * harness's own sandboxed path. `attachments` and `llm` are consulted when
  * present and never required: a composition without them can still keep the
  * record, it just cannot show the picture.
@@ -31,8 +31,6 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 /** How many sessions keep a folded record, and how many pictures stay decoded. */
 const SESSION_CACHE_LIMIT = 64
 const SOURCE_CACHE_LIMIT = 8
-
-const VIEW_MODES = ['map', 'marks']
 
 /** Where rendered views are written, relative to the session working directory. */
 const VIEW_DIR = '.dsh-vision'
@@ -61,7 +59,7 @@ const VIEW_VALUE_SCHEMA = {
   additionalProperties: false,
   required: ['kind', 'name', 'width', 'height'],
   properties: {
-    kind: { type: 'string', enum: ['map', 'zoom', 'sheet', 'cover'] },
+    kind: { type: 'string', enum: ['frame', 'cell', 'compare', 'cover'] },
     name: { type: 'string' },
     label: { type: 'string' },
     width: { type: 'integer' },
@@ -69,8 +67,16 @@ const VIEW_VALUE_SCHEMA = {
   }
 }
 
-/** What the model gets back about the picture itself, on every call. */
+/** What every call reports: the record it changed, and the view it is looking at. */
 const PICTURE_RESULT_PROPERTIES = {
+  view: {
+    type: 'string',
+    required: true,
+    description: 'Handle of the view this call is looking at; copy it back as `view`.'
+  },
+  grid: { type: 'string', required: true, description: 'The view\'s cells, as `10x7 A-J 1-7`.' },
+  marksShown: { type: 'boolean', required: true },
+  record: { type: 'array', required: true, items: { type: 'string' } },
   views: { type: 'array', required: true, items: VIEW_VALUE_SCHEMA },
   images: { type: 'array', required: true, items: IMAGE_VALUE_SCHEMA },
   attached: { type: 'boolean', required: true },
@@ -100,22 +106,31 @@ const IMAGE_PARAMETER = {
   description: 'Path to the picture. A relative path resolves against the session working directory.'
 }
 
+const VIEW_PARAMETER = {
+  type: 'string',
+  description: 'The `view` handle copied verbatim from the result you are looking at. It names the picture, ' +
+    'or the part of it, that was drawn for you. Never write one yourself: to look at another part, call ' +
+    'vision_look.'
+}
+
+const SIZE_PARAMETER = {
+  type: 'string',
+  enum: ['s', 'm', 'l'],
+  description: 'How big the ring is drawn, as it looks on the view you are marking on: s for one face in ' +
+    'a crowd, m for a person, l for a group or a large area.'
+}
+
 const MARK_ITEM_SCHEMA = {
   type: 'object',
   additionalProperties: false,
+  required: ['cell'],
   properties: {
-    kind: {
+    cell: {
       type: 'string',
-      enum: ['point', 'box'],
-      description: 'point (the default when `at` is given) or box (the default when `box` is given).'
+      description: 'The cell you can see it in, read off the grid — `C3`. Look closer first if a cell is ' +
+        'too coarse to tell one thing from its neighbour.'
     },
-    at: { type: 'array', items: { type: 'number' }, description: 'A point: [x, y] in ORIGINAL image pixels.' },
-    box: {
-      type: 'array',
-      items: { type: 'number' },
-      description: 'A box: [x0, y0, x1, y1] in ORIGINAL image pixels.'
-    },
-    r: { type: 'number', description: 'Radius of a point, in original pixels. Default 60.' },
+    size: SIZE_PARAMETER,
     caption: { type: 'string', description: 'A few words drawn beside the number, e.g. "half hidden".' },
     colour: { type: 'string', enum: COLOUR_NAMES, description: `Its meaning is yours. Default ${DEFAULT_COLOUR}.` }
   }
@@ -128,63 +143,13 @@ const OP_ITEM_SCHEMA = {
   properties: {
     id: { type: 'integer', description: 'The number drawn on the picture.' },
     move: {
-      type: 'array',
-      items: { type: 'number' },
-      description: 'New position: [x, y] for a point, [x0, y0, x1, y1] for a box, in ORIGINAL pixels.'
+      type: 'string',
+      description: 'The cell of the current view the mark belongs in, read off its grid.'
     },
-    r: { type: 'number', description: 'New radius for a point.' },
+    size: SIZE_PARAMETER,
     caption: { type: 'string', description: 'New caption; "" clears it.' },
-    colour: { type: 'string', enum: COLOUR_NAMES, description: 'New colour.' },
-    remove: { type: 'boolean', description: 'true deletes the mark.' }
+    colour: { type: 'string', enum: COLOUR_NAMES, description: 'New colour.' }
   }
-}
-
-/** Switches that keep the marks from covering what is being read. */
-const MARK_VISIBILITY_PARAMETERS = {
-  ids: {
-    type: 'boolean',
-    description: 'Draw each mark\'s number (default true). Turn it off in a dense cluster: a number sits ' +
-      'above its ring, and in a dense cluster the numbers cover what you are trying to read.'
-  },
-  captions: {
-    type: 'boolean',
-    description: 'Draw each mark\'s caption beside its number (default true). Turn it off to see the ' +
-      'picture under the marks.'
-  }
-}
-
-const VIEW_MODE_PARAMETER = {
-  type: 'string',
-  enum: VIEW_MODES,
-  description: 'map (the whole frame; the default, and what every call that changes the record comes ' +
-    'back with) or marks (a sheet of close-ups of exactly what this call touched).'
-}
-
-/**
- * What a look can be asked for. Every parameter here reaches the model on every
- * request, so it gets the short list; `lib/render.js` accepts the rest.
- */
-const LOOK_PARAMETERS = {
-  views: {
-    type: 'array',
-    items: { type: 'string' },
-    description: 'What to look at, each entry one of: "#17" (a stored mark), "640,480" (a point), or ' +
-      '"120,240,360,520" (a rectangle). ONE entry is a close-up with a labelled coordinate grid; ' +
-      'SEVERAL entries come back as a SINGLE sheet, which is how doubtful places get compared for the ' +
-      'price of one look.'
-  },
-  cover: {
-    type: 'string',
-    description: `Paint these colours out instead of outlining them (${COLOUR_NAMES.join(', ')}, or ` +
-      '"all"). Whatever still shows has not been marked.'
-  },
-  map: { type: 'boolean', description: 'Draw the whole frame with the ruler and every mark.' },
-  target: {
-    type: 'integer',
-    description: 'Longest side of a single view, in pixels (1400 for a map, 1200 for a close-up). Lower ' +
-      'it to spend fewer tokens on a picture, raise it to read a small detail.'
-  },
-  ...MARK_VISIBILITY_PARAMETERS
 }
 
 /**
@@ -307,7 +272,7 @@ async function attachBlocker(ctx, exec, session) {
 }
 
 /**
- * Register the five tools.
+ * Register the four tools.
  * @param ctx - the plugin's own context, carrying `tools` and `fs`.
  */
 export function apply(ctx) {
@@ -422,45 +387,109 @@ export function apply(ctx) {
     return blocks
   }
 
+  /** One call, whatever it changes: the record comes first, then the picture. */
+  function run(plan) {
+    return async (args, exec) => {
+      const session = requireSession(exec)
+      const record = records(session, imageKey(args.image, session.header.cwd), args.image)
+      const planned = await plan({ record, args, loadSource: () => loadSource(args.image, exec) })
+      const attached = await attach(planned.views, exec, session)
+      return { ...planned.result, ...attached }
+    }
+  }
+
   ctx.tools.register({
-    name: 'vision_mark',
+    name: 'vision_look',
     description:
-      'Put numbered marks on a picture. A mark is a position, a number, a caption and a colour, and the ' +
-      'number is drawn ON the picture — so the number is the address you use afterwards (#17). Nothing ' +
-      'here counts or judges: counting what the picture holds is your statement to make, and this tool ' +
-      'only says how many numbers you have drawn. Give every mark of one round in ONE call. Coordinates ' +
-      'are pixels in the ORIGINAL image: read them off a view\'s ruler or coordinate grid, never off a ' +
-      'scaled preview — a preview\'s pixel is not the picture\'s pixel.',
+      'Look at the picture: all of it, or one cell of it closer. Start here — nothing can be marked on a ' +
+      'view you have not been shown. `cell` takes you one level in, and looking again inside the new view ' +
+      'takes you another, which is how one face in a crowd is finally read. The picture comes back with a ' +
+      'grid whose letters and numbers are on all four edges; the result names the view handle to copy ' +
+      'back. It is drawn without your marks unless you ask for `marks: true`; `compare` puts marks side by ' +
+      'side to ask "is this one thing or two"; `cover` paints a colour out, so whatever still shows has ' +
+      'not been marked.',
     parameters: {
       type: 'object',
       additionalProperties: false,
-      required: ['image', 'marks'],
+      required: ['image'],
       properties: {
         image: IMAGE_PARAMETER,
-        marks: { type: 'array', items: MARK_ITEM_SCHEMA, description: 'The marks to add, in the order to number them.' },
-        view: VIEW_MODE_PARAMETER,
-        ...MARK_VISIBILITY_PARAMETERS
+        view: {
+          type: 'string',
+          description: 'The handle of the view to look at, copied from an earlier result. Omit it for the ' +
+            'whole picture.'
+        },
+        cell: {
+          type: 'string',
+          description: 'The cell of that view to look at closer, e.g. "C3". Omit it to look at the view as ' +
+            'it is.'
+        },
+        marks: {
+          type: 'boolean',
+          description: 'Draw the marks on the picture (default false: the picture is what is being read).'
+        },
+        compare: {
+          type: 'array',
+          items: { type: 'integer' },
+          description: 'Mark numbers to put side by side in one picture, for places too close to tell apart.'
+        },
+        cover: {
+          type: 'string',
+          description: `Paint these marked colours out (${COLOUR_NAMES.join(', ')}, or "all"); whatever ` +
+            'still shows has not been marked.'
+        }
+      }
+    },
+    output: {
+      schema: recordResultSchema({}),
+      render: (_args, value) => renderContent(value),
+      presentationMeta: (_args, value) => presentationMetaOf(value)
+    },
+    execute: run(planLook),
+    presentCall: (args) => ({
+      card: 'generic',
+      title: args.compare?.length
+        ? `Compare ${args.compare.map((id) => `#${id}`).join(' ')}`
+        : args.cover !== undefined
+          ? `Cover ${args.cover}`
+          : args.cell !== undefined ? `Look closer at ${args.cell}` : `Look at ${args.image}`,
+      kind: 'read',
+      locations: [{ path: args.image }]
+    })
+  })
+
+  ctx.tools.register({
+    name: 'vision_mark',
+    description:
+      'Mark places on the picture, one cell at a time. LOOK FIRST: `view` is the handle of the view you ' +
+      'were just shown and `cell` is a square of its grid, so a mark is placed by what you can see, never ' +
+      'by a coordinate you work out — and a picture you have not looked at with vision_look cannot be ' +
+      'marked at all. If a cell is too coarse to tell one thing from its neighbour, look closer at it ' +
+      'first and mark in the closer view. Mark a few places, read the picture that comes back, then ' +
+      'continue; the whole record is listed in every result, so double marks and mistakes show up as you ' +
+      'go. Nothing here counts or judges what the picture holds — that is your statement to make.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['image', 'view', 'marks'],
+      properties: {
+        image: IMAGE_PARAMETER,
+        view: VIEW_PARAMETER,
+        marks: {
+          type: 'array',
+          items: MARK_ITEM_SCHEMA,
+          description: 'The places to mark, in the order to number them.'
+        }
       }
     },
     output: {
       schema: recordResultSchema({
-        marked: { type: 'array', required: true, items: { type: 'integer' } },
-        viewMode: { type: 'string', required: true, enum: VIEW_MODES }
+        marked: { type: 'array', required: true, items: { type: 'integer' } }
       }),
       render: (_args, value) => renderContent(value),
       presentationMeta: (_args, value) => presentationMetaOf(value)
     },
-    async execute(args, exec) {
-      const session = requireSession(exec)
-      const record = records(session, imageKey(args.image, session.header.cwd), args.image)
-      const planned = await planMark({
-        record,
-        args,
-        loadSource: () => loadSource(args.image, exec)
-      })
-      const attached = await attach(planned.views, exec, session)
-      return { ...planned.result, ...attached }
-    },
+    execute: run(planMark),
     presentCall: (args) => ({
       card: 'generic',
       title: `Mark ${args.marks?.length ?? 0} place(s) on ${args.image}`,
@@ -470,102 +499,11 @@ export function apply(ctx) {
   })
 
   ctx.tools.register({
-    name: 'vision_update',
-    description:
-      'Move, recaption, recolour or delete marked places by their number. One call takes many operations, ' +
-      'so a round of corrections is one call: 17=yellow, 21 "half hidden", 16 removed. Use it when a ' +
-      'close-up shows a mark is off the thing it names, or that two numbers sit on the same place.',
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['image', 'ops'],
-      properties: {
-        image: IMAGE_PARAMETER,
-        ops: { type: 'array', items: OP_ITEM_SCHEMA, description: 'The operations, applied in order.' },
-        view: VIEW_MODE_PARAMETER,
-        ...MARK_VISIBILITY_PARAMETERS
-      }
-    },
-    output: {
-      schema: recordResultSchema({
-        updated: {
-          type: 'object',
-          required: true,
-          additionalProperties: true,
-          properties: {}
-        },
-        removed: { type: 'array', required: true, items: { type: 'integer' } },
-        viewMode: { type: 'string', required: true, enum: VIEW_MODES }
-      }),
-      render: (_args, value) => renderContent(value),
-      presentationMeta: (_args, value) => presentationMetaOf(value)
-    },
-    async execute(args, exec) {
-      const session = requireSession(exec)
-      const record = records(session, imageKey(args.image, session.header.cwd), args.image)
-      const planned = await planUpdate({
-        record,
-        args,
-        loadSource: () => loadSource(args.image, exec)
-      })
-      const attached = await attach(planned.views, exec, session)
-      return { ...planned.result, ...attached }
-    },
-    presentCall: (args) => ({
-      card: 'generic',
-      title: `Update ${args.ops?.length ?? 0} mark(s) on ${args.image}`,
-      kind: 'other',
-      locations: [{ path: args.image }]
-    })
-  })
-
-  ctx.tools.register({
-    name: 'vision_show',
-    description:
-      'Look at the picture. No address draws the whole frame with a ruler and every mark; ONE address ' +
-      'draws a close-up with a labelled coordinate grid; SEVERAL addresses come back as ONE sheet, which ' +
-      'is how doubtful places get compared side by side for the price of a single look — use a sheet to ' +
-      'ask "is this one thing or two", never four separate looks. `cover` paints the settled colours ' +
-      'out, so whatever still shows has not been marked yet: that is how a missed one is found. Every ' +
-      'number printed on a view is an ORIGINAL-image coordinate or a mark number.',
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['image'],
-      properties: { image: IMAGE_PARAMETER, ...LOOK_PARAMETERS }
-    },
-    output: {
-      schema: recordResultSchema({}),
-      render: (_args, value) => renderContent(value),
-      presentationMeta: (_args, value) => presentationMetaOf(value)
-    },
-    async execute(args, exec) {
-      const session = requireSession(exec)
-      const record = records(session, imageKey(args.image, session.header.cwd), args.image)
-      const planned = await planShow({
-        record,
-        args,
-        loadSource: () => loadSource(args.image, exec)
-      })
-      const attached = await attach(planned.views, exec, session)
-      return { ...planned.result, ...attached }
-    },
-    presentCall: (args) => ({
-      card: 'generic',
-      title: args.views?.length
-        ? `Look at ${args.views.join(' ')}`
-        : args.cover !== undefined ? `Cover ${args.cover}` : `Look at ${args.image}`,
-      kind: 'read',
-      locations: [{ path: args.image }]
-    })
-  })
-
-  ctx.tools.register({
     name: 'vision_unmark',
     description:
-      'Delete marks by number, e.g. [3, 7]. Use it as soon as a mark is in the wrong place: a number ' +
-      'left in the record still reads as a place you have already dealt with, so the mistake becomes ' +
-      'invisible. Give every number of one round in ONE call. The whole frame comes back redrawn.',
+      'Delete marks by number, e.g. [3, 7]. Use it as soon as a mark is wrong — a number left in the ' +
+      'record still reads as a place you have already dealt with, and the mistake becomes invisible in ' +
+      'the list. The whole picture comes back, with the record.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -575,37 +513,19 @@ export function apply(ctx) {
         marks: {
           type: 'array',
           items: { type: 'integer' },
-          description: 'The numbers to delete, as drawn on the picture; vision_list prints them.'
-        },
-        view: VIEW_MODE_PARAMETER,
-        ...MARK_VISIBILITY_PARAMETERS
+          description: 'The numbers to delete, as drawn on the picture; every result lists them.'
+        }
       }
     },
     output: {
       schema: recordResultSchema({
-        updated: {
-          type: 'object',
-          required: true,
-          additionalProperties: true,
-          properties: {}
-        },
-        removed: { type: 'array', required: true, items: { type: 'integer' } },
-        viewMode: { type: 'string', required: true, enum: VIEW_MODES }
+        updated: { type: 'object', required: true, additionalProperties: true, properties: {} },
+        removed: { type: 'array', required: true, items: { type: 'integer' } }
       }),
       render: (_args, value) => renderContent(value),
       presentationMeta: (_args, value) => presentationMetaOf(value)
     },
-    async execute(args, exec) {
-      const session = requireSession(exec)
-      const record = records(session, imageKey(args.image, session.header.cwd), args.image)
-      const planned = await planUnmark({
-        record,
-        args,
-        loadSource: () => loadSource(args.image, exec)
-      })
-      const attached = await attach(planned.views, exec, session)
-      return { ...planned.result, ...attached }
-    },
+    execute: run(planUnmark),
     presentCall: (args) => ({
       card: 'generic',
       title: `Remove ${args.marks?.length ?? 0} mark(s) from ${args.image}`,
@@ -615,38 +535,35 @@ export function apply(ctx) {
   })
 
   ctx.tools.register({
-    name: 'vision_list',
+    name: 'vision_edit',
     description:
-      'Read the mark record back as text: one line per number, with its position, colour and caption. ' +
-      'Use it to check what you have written down: one mark missing from a scene you believe holds ' +
-      'more is a difference worth seeing. It describes the RECORD, not the picture: it cannot ' +
-      'count what is in the picture for you, and it is no substitute for looking.',
+      'Correct marks that are nearly right: move one into the cell it belongs in, resize it, recaption or ' +
+      'recolour it. One call takes many operations, so a round of corrections is one call. Moving or ' +
+      'resizing happens in the view you are looking at, so those need its `view` handle and a cell of its ' +
+      'grid. To take a wrong mark out, use vision_unmark. The picture comes back, with the record.',
     parameters: {
       type: 'object',
       additionalProperties: false,
-      required: ['image'],
-      properties: { image: IMAGE_PARAMETER }
+      required: ['image', 'ops'],
+      properties: {
+        image: IMAGE_PARAMETER,
+        view: VIEW_PARAMETER,
+        ops: { type: 'array', items: OP_ITEM_SCHEMA, description: 'The operations, applied in order.' }
+      }
     },
     output: {
       schema: recordResultSchema({
-        items: { type: 'array', required: true, items: { type: 'object', additionalProperties: true, properties: {} } }
+        updated: { type: 'object', required: true, additionalProperties: true, properties: {} },
+        removed: { type: 'array', required: true, items: { type: 'integer' } }
       }),
       render: (_args, value) => renderContent(value),
       presentationMeta: (_args, value) => presentationMetaOf(value)
     },
-    execute(args, exec) {
-      const session = requireSession(exec)
-      const record = records(session, imageKey(args.image, session.header.cwd), args.image)
-      const planned = planList({ record })
-      // `views` and `images` are empty rather than absent: the registry checks a
-      // tool's value against its declared output schema, and a missing required
-      // key is rejected as an invalid result.
-      return Promise.resolve({ ...planned.result, views: [], images: [], attached: true })
-    },
+    execute: run(planEdit),
     presentCall: (args) => ({
       card: 'generic',
-      title: `Read the mark record for ${args.image}`,
-      kind: 'read',
+      title: `Edit ${args.ops?.length ?? 0} mark(s) on ${args.image}`,
+      kind: 'other',
       locations: [{ path: args.image }]
     })
   })
