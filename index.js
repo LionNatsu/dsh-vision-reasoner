@@ -59,7 +59,7 @@ const VIEW_VALUE_SCHEMA = {
   additionalProperties: false,
   required: ['kind', 'name', 'width', 'height'],
   properties: {
-    kind: { type: 'string', enum: ['frame', 'cell', 'compare', 'cover'] },
+    kind: { type: 'string', enum: ['frame', 'cell', 'block', 'compare', 'cover'] },
     name: { type: 'string' },
     label: { type: 'string' },
     width: { type: 'integer' },

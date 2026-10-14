@@ -290,7 +290,8 @@ test('looking returns the handle, the grid and the record', async () => {
   assert.equal(looked.views[0].name, 'frame-a.png')
   const text = describeResult(looked.result)
   assert.match(text, /\(no marks yet\)/)
-  assert.match(text, new RegExp(`view ${token()} — grid 10x7 A-J 1-7, no marks drawn`))
+  assert.match(text, new RegExp(`view ${token()} \\(copy this as "view"\\) — grid 10x7 A-J 1-7, no marks drawn`))
+  assert.doesNotMatch(text, /picture:/, 'the file name is offered as a file, never as a handle')
 })
 
 test('looking closer keeps that cell as the handle', async () => {

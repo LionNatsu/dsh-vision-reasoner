@@ -232,6 +232,9 @@ test('every tool value satisfies its own declared output schema', async (t) => {
     ['vision_edit', { image: imagePath, view, ops: [{ id: 1, move: 'B2', colour: 'yellow' }] }],
     ['vision_unmark', { image: imagePath, marks: [1] }],
     ['vision_look', { image: imagePath, view, cell: 'C3', marks: true }],
+    // A block carries its own kind; leaving it out of the declared enum made every
+    // block look fail the registry's check and reach the model as an error.
+    ['vision_look', { image: imagePath, view, cell: 'A1-B2' }],
     ['vision_look', { image: imagePath, compare: [2] }],
     ['vision_look', { image: imagePath, cover: 'green' }]
   ]
@@ -363,7 +366,8 @@ test('a picture is attached, and its path is reported when the backend has one',
   assert.equal(content[1].type, 'image')
   assert.equal(content[1].attachment.attachmentId, 'attachment-1')
   assert.match(content[0].text, /no marks yet/)
-  assert.match(content[0].text, new RegExp(`view ${value.view} — grid 10x7 A-J 1-7, marks drawn`))
+  assert.match(content[0].text, new RegExp(`view ${value.view} \\(copy this as "view"\\) — grid 10x7 A-J 1-7, marks drawn`))
+  assert.match(content[0].text, /saved as \.dsh-vision\/frame-photo\.png \(1400x1050\)/)
 })
 
 test('a model that cannot take images is told so, and gets text instead', async (t) => {
