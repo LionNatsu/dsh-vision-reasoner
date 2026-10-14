@@ -109,10 +109,18 @@ the marks are committed by then.
 
 | Tool | Behaviour |
 |---|---|
-| `vision_look` | The whole picture, a rectangle of it, several marks side by side, or a colour painted out. Draws the marks only when asked |
+| `vision_look` | The whole picture, a rectangle of it, several rectangles at once, several marks side by side, or a colour painted out. Draws the marks only when asked |
 | `vision_mark` | Adds marks at the coordinates given, numbered in the order given |
 | `vision_unmark` | Deletes marks by number, through the same removal operation as `vision_edit` |
 | `vision_edit` | Moves, resizes, recaptions or recolours marks by number; one call takes many operations |
+
+A look that names several rectangles renders each at `TILE` and assembles one sheet
+labelled with each rectangle, capped at `MAX_SHEET_TILES` — nine tiles at 620 pixels
+fit under the attachment pipeline's downscale threshold, and a tenth would buy a
+smaller picture rather than a bigger one. Sheet cells follow the tiles' mean aspect
+ratio, because square cells around wide tiles double a sheet's pixels to show the
+same picture. A sweep is the shape a counting task needs: one call for a band of the
+picture, then a `cover` of the same rectangle to find what the band still shows.
 
 Every result carries the same things: the picture's size, the rectangle drawn, the
 grid's step, whether the marks are drawn, and the whole record as one line per mark

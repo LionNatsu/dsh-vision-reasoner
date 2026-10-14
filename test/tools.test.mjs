@@ -238,7 +238,9 @@ test('every tool value satisfies its own declared output schema', async (t) => {
     ['vision_look', { image: imagePath, region: [100, 100, 500, 400], marks: true }],
     ['vision_look', { image: imagePath, compare: [2] }],
     ['vision_look', { image: imagePath, cover: 'green' }],
-    ['vision_look', { image: imagePath, region: [100, 100, 400, 300], cover: 'all' }]
+    ['vision_look', { image: imagePath, region: [100, 100, 400, 300], cover: 'all' }],
+    // A sheet of rectangles: the value carries the same fields as any other look.
+    ['vision_look', { image: imagePath, regions: [[0, 0, 400, 300], [400, 0, 800, 300]] }]
   ]
   for (const [toolName, args] of calls) {
     const { value, content } = await call(harness, toolName, args, session)

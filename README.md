@@ -11,7 +11,7 @@ similar regions a note meant is another.
 
 | Tool | Purpose |
 |---|---|
-| `vision_look` | Look at the whole picture, or at a rectangle of it, given as `[x0, y0, x1, y1]` in original pixels. Compare marks side by side; paint a colour out. The picture is drawn without the marks unless they are asked for. |
+| `vision_look` | Look at the whole picture, at a rectangle of it given as `[x0, y0, x1, y1]` in original pixels, or at up to nine rectangles at once, which come back as one sheet of labelled tiles. Compare marks side by side; paint a colour out. The picture is drawn without the marks unless they are asked for. |
 | `vision_mark` | Mark places by their coordinates, `at: [x, y]` in original pixels, with a size, a caption and a colour. |
 | `vision_unmark` | Delete marks by number, e.g. `[3, 7]`, when a mark is in the wrong place. |
 | `vision_edit` | Move, resize, recaption or recolour marks by number, in one call. |
@@ -54,10 +54,17 @@ locale files are this package's own. Node `^22.19.0 || >=24.0.0`.
 3. **Mark the coordinates.** `vision_mark` takes `at: [x, y]`, a size the caller
    judges by eye (`s`, `m`, `l`), a caption and a colour. The picture comes back
    drawn around what was just marked, with the ring on it and the record beside it.
-4. **Check, then correct.** `cover` paints the marked colours out, so whatever still
+4. **Sweep, then finish a tile at a time.** `regions` takes up to nine rectangles
+   and returns one sheet, each tile labelled with the rectangle it came from and
+   carrying its own grid. Reading a tile, marking what is in it, then `cover`ing that
+   same rectangle is how a crowded scene is counted in a handful of calls instead of
+   twenty separate looks.
+5. **Check, then correct.** `cover` paints the marked colours out, so whatever still
    shows has not been marked; `compare` puts marks side by side when two places are
    too close to tell apart; `vision_edit` moves a mark that is nearly right and
-   `vision_unmark` deletes one that is not.
+   `vision_unmark` deletes one that is not. A change comes back drawn around what it
+   touched — one tile per mark when those are spread across the picture — so a ring
+   that missed its face is visible in the answer that placed it.
 
 ## Behaviour
 
@@ -98,8 +105,10 @@ withholding a picture over a failed lookup costs more than it protects.
 - Every view is rendered at the same longest side, so looking at a rectangle is
   never coarser than looking at the whole picture.
 - Marks are drawn only when asked for, so what is being read is the picture.
-- A comparison sheet is the only way to put several places in one picture, and it
-  exists because pictures received separately cannot be compared.
+- A sheet is the only way to put several places in one picture, because pictures
+  received separately cannot be compared. Its cells take the shape of the tiles they
+  hold, so a row of wide tiles is not padded into squares, and it holds at most nine
+  tiles so the sheet is not downscaled on its way out.
 - `cover` paints the given colours out: whatever still shows has not been marked.
   It checks the record, not the perception that produced it.
 - A view's longest side is capped at 4096 pixels (`MAX_VIEW_DIMENSION`).

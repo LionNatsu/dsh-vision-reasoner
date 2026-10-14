@@ -12,7 +12,9 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { COLOURS, DEFAULT_COLOUR, MUTATING_TOOLS, applyToolArgs, emptyRecord, imageKey } from './lib/record.js'
-import { describe as describeResult, planEdit, planLook, planMark, planUnmark } from './lib/core.js'
+import {
+  MAX_SHEET_TILES, describe as describeResult, planEdit, planLook, planMark, planUnmark
+} from './lib/core.js'
 import { probeImageSize } from './lib/render.js'
 
 export const name = 'vision-reasoner'
@@ -410,7 +412,8 @@ export function apply(ctx) {
       'in ORIGINAL image pixels — the picture\'s top-left corner is 0,0 — so a number you read is a number ' +
       'you can use: nothing is scaled, and nothing has to be converted. Start here; a place is named from ' +
       'what you have seen. `region` is [x0, y0, x1, y1] read off those labels: leave it out for the whole ' +
-      'picture, give a small one to read a face closely. This grid is the only ruler — do not crop the ' +
+      'picture, give a small one to read a face closely, or give `regions` — several rectangles at once — ' +
+      'to sweep a picture in a few calls. This grid is the only ruler — do not crop the ' +
       'picture with another tool, and do not read a position off another view of it, whose pixels are a ' +
       'different size. The picture is drawn without your marks unless you ask for `marks: true`; `compare` ' +
       'puts marks side by side to ask "is this one thing or two"; `cover` paints a colour out, so whatever ' +
@@ -422,6 +425,15 @@ export function apply(ctx) {
       properties: {
         image: IMAGE_PARAMETER,
         region: REGION_PARAMETER,
+        regions: {
+          type: 'array',
+          items: { type: 'array', items: { type: 'integer' } },
+          description: 'Several rectangles in one call, e.g. [[0, 0, 900, 450], [900, 0, 1800, 450]], at ' +
+            `most ${MAX_SHEET_TILES}: they come back as one sheet of tiles, each labelled with the rectangle ` +
+            'it came from and carrying its own grid. This is how a whole picture is swept in a few calls: ' +
+            'read a tile, mark what is in it, then cover that rectangle to find what you missed. Give either ' +
+            'this or region, compare or cover, not two of them.'
+        },
         marks: {
           type: 'boolean',
           description: 'Draw the marks on the picture (default false: the picture is what is being read).'
@@ -451,7 +463,9 @@ export function apply(ctx) {
         ? `Compare ${args.compare.map((id) => `#${id}`).join(' ')}`
         : args.cover !== undefined
           ? `Cover ${args.cover}`
-          : Array.isArray(args.region) ? `Look at ${args.region.join(',')}` : `Look at ${args.image}`,
+          : Array.isArray(args.regions)
+            ? `Look at ${args.regions.length} rectangle(s)`
+            : Array.isArray(args.region) ? `Look at ${args.region.join(',')}` : `Look at ${args.image}`,
       kind: 'read',
       locations: [{ path: args.image }]
     })

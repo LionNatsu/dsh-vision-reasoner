@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import sharp from 'sharp'
 
 import { MUTATING_TOOLS, applyToolArgs, emptyRecord, markPoint, markRect } from '../lib/record.js'
-import { describe as describeResult, planLook, planMark, recordLines } from '../lib/core.js'
+import { MAX_SHEET_TILES, describe as describeResult, planLook, planMark, recordLines } from '../lib/core.js'
 import { VIEW_TARGET, clampRegion, viewOf } from '../lib/render.js'
 import {
   SIZES, frameRegion, gridLines, gridStep, placeAt, radiusFor, regionAround, regionOf, regionText
@@ -170,6 +170,33 @@ test('marking reports where it landed, and draws a rectangle around it', async (
   assert.equal(marked.result.region, '549,349,711,511', 'around what was just marked')
   assert.equal(marked.result.views[0].kind, 'crop')
   assert.equal(marked.result.step, 20, 'and the grid is finer there, because the view is closer')
+})
+
+test('several rectangles come back as one sheet, each labelled with where it came from', async () => {
+  const src = await source()
+  const swept = await planLook({
+    record: emptyRecord('a.png'),
+    args: { image: 'a.png', regions: [[0, 0, 600, 400], [600, 0, 1200, 400], [0, 400, 1200, 800]] },
+    loadSource: loadSource(src)
+  })
+  assert.equal(swept.views.length, 1, 'one picture, not one per rectangle')
+  assert.equal(swept.views[0].kind, 'compare')
+  assert.equal(swept.views[0].name, 'sheet-3-a.png')
+  assert.match(swept.views[0].label, /#1 0,0,600,400, #2 600,0,1200,400, #3 0,400,1200,800/)
+  // Three tiles, so two columns; and the cells take the tiles' own shape — about
+  // twice as wide as tall here — rather than being padded into 620-pixel squares,
+  // which would have made the sheet 1354 tall and shown no more picture.
+  assert.equal(swept.views[0].width, 2 * (620 + 10) + 10)
+  assert.equal(swept.views[0].height, 2 * (310 + 10 + 42) + 10)
+})
+
+test('a sheet holds a bounded number of rectangles', async () => {
+  const src = await source()
+  const many = Array.from({ length: MAX_SHEET_TILES + 1 }, (_, i) => [i * 100, 0, i * 100 + 100, 100])
+  await assert.rejects(
+    () => planLook({ record: emptyRecord('a.png'), args: { image: 'a.png', regions: many }, loadSource: loadSource(src) }),
+    /regions holds at most 9 rectangles, got 10/
+  )
 })
 
 test('a comparison sheet puts the marks side by side', async () => {
