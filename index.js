@@ -314,7 +314,7 @@ async function attachBlocker(ctx, exec, session) {
 }
 
 /**
- * Register the four tools.
+ * Register the seven tools.
  * @param ctx - the plugin's own context, carrying `tools` and `fs`.
  */
 export function apply(ctx) {
@@ -486,7 +486,7 @@ export function apply(ctx) {
       'Move the camera and see what it looks at now. `step` moves one whole window — "next" walks the ' +
       'sweep in reading order, left to right and then the row below — and `to` puts the window\'s centre ' +
       'on a place you read off the grid. Give one, or a place and then a step. The windows tile the ' +
-      'picture from its top-left corner: as many across and down as it takes at the current size, which ' +
+      'picture centred on it: as many across and down as it takes at the current size, which ' +
       'every result states, along with which cell the camera is in, how many have been stopped in since ' +
       'the last reset, and which are left. A cell counts as looked at when the camera stopped in it. ' +
       'The window is a square of the picture\'s own pixels and the picture is drawn inside it at ' +

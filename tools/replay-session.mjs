@@ -12,11 +12,11 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { zstdDecompressSync } from 'node:zlib'
 
-import { MUTATING_TOOLS, applyToolArgs, emptyRecord, imageKey, recordSummary } from '../lib/record.js'
-import { VIEW_TARGET, prepareSource, probeImageSize, renderRegion } from '../lib/render.js'
-import { frameRegion } from '../lib/views.js'
+import { TRACKED_TOOLS, commitCall, emptyRecord, imageKey, recordSummary } from '../lib/record.js'
+import { prepareSource, probeImageSize, renderWindow } from '../lib/render.js'
+import { resolveCamera } from '../lib/camera.js'
 
-const MUTATING = new Set(MUTATING_TOOLS)
+const TRACKED = new Set(TRACKED_TOOLS)
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 
@@ -97,7 +97,7 @@ const pending = new Map()
 
 for (const event of events) {
   if (event.type === 'tool/call') {
-    if (!MUTATING.has(event.data?.name)) continue
+    if (!TRACKED.has(event.data?.name)) continue
     let args
     try {
       args = JSON.parse(event.data.arguments)
@@ -117,7 +117,7 @@ for (const event of events) {
     const key = imageKey(call.args.image, sessionCwd)
     const record = records.get(key) ?? emptyRecord(call.args.image)
     try {
-      records.set(key, applyToolArgs(record, call.tool, call.args))
+      records.set(key, commitCall(record, call.tool, call.args).record)
     } catch (error) {
       console.error(`a committed call did not replay: ${error.message}`)
     }
@@ -145,10 +145,10 @@ if (out !== undefined) {
   const path = record.image
   const size = await probeImageSize(path)
   const bytes = await prepareSource(readFileSync(path), size.orientation)
-  const drawn = await renderRegion(bytes, record, frameRegion(size.width, size.height), {
-    target: VIEW_TARGET,
-    showMarks: true,
-    bounds: { width: size.width, height: size.height }
+  const window = resolveCamera(record.camera ?? [], size.width, size.height)
+  const drawn = await renderWindow(bytes, record, window, {
+    picture: { width: size.width, height: size.height },
+    marks: true
   })
   writeFileSync(out, drawn.png)
   console.log(`\nrendered ${drawn.width}x${drawn.height} -> ${out}   (record key ${key})`)

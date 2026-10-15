@@ -12,7 +12,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -228,9 +228,9 @@ test('the surface is seven verbs: the camera and the record, and every parameter
 })
 
 test('every tool value satisfies its own declared output schema', async (t) => {
-  const { imagePath } = await fixture(t)
+  const { dir, imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
-  const session = fakeSession()
+  const session = fakeSession(dir)
   const calls = [
     ['camera_reset', { image: imagePath }],
     ['camera_move', { image: imagePath, step: 'next' }],
@@ -245,14 +245,24 @@ test('every tool value satisfies its own declared output schema', async (t) => {
     const result = await committedCall(harness, tool, args, session, `c-${tool}`)
     const problems = schemaViolations(result.tool.output.schema, result.value)
     assert.deepEqual(problems, [], `${tool} returned a value the registry would reject`)
+    // The value is logged, so it has to be lossless JSON: no Buffers, no `undefined`.
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), result.value, `${tool} returned a non-JSON value`)
+    // The metadata the Web client reads is a second projection, and a `path: undefined`
+    // there fails the whole result at dispatch, exactly as a missing required key would.
+    const project = result.tool.output.presentationMeta
+    if (typeof project === 'function') {
+      const meta = project(args, result.value)
+      assert.deepEqual(JSON.parse(JSON.stringify(meta)), meta, `${tool} projected non-lossless presentationMeta`)
+      assert.equal(typeof meta.marks, 'number', `${tool} did not report its mark count to the row`)
+    }
     assert.ok(result.content.some((block) => block.type === 'image'), `${tool} returned no picture`)
   }
 })
 
 test('every view is a square, whatever the camera was asked for', async (t) => {
-  const { imagePath } = await fixture(t)
+  const { dir, imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
-  const session = fakeSession()
+  const session = fakeSession(dir)
   for (const [tool, args] of [
     ['camera_reset', {}],
     ['camera_zoom_in', { times: 3 }],
@@ -271,96 +281,137 @@ test('every view is a square, whatever the camera was asked for', async (t) => {
 })
 
 test('the whole picture is drawn inside the square, and what is outside it is black', async (t) => {
-  const { imagePath } = await fixture(t)
+  const { dir, imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
-  const session = fakeSession()
+  const session = fakeSession(dir)
   const result = await committedCall(harness, 'camera_reset', { image: imagePath }, session, 'reset')
   assert.equal(result.value.whole, true)
+  assert.equal(result.value.picture, '800x600')
   assert.equal(result.value.window, '0,-100,800,700', 'the 800x600 picture centred in an 800 square')
   const text = describeResult(result.value)
   assert.match(text, /drawn 1400x1400 \(1\.8x of the picture\)/)
   assert.match(text, /the whole picture, 1400x1050 inside it/)
 
+  // The view is a file the row can open as well as an attachment, and the path is reported
+  // workspace-relative: a result carrying `path: undefined` fails the whole call at dispatch.
+  assert.equal(result.value.images[0].path, '.dsh-vision/picture-photo.png')
+  assert.ok(existsSync(join(dir, '.dsh-vision', 'picture-photo.png')), 'the view is a real file the UI can open')
+  assert.equal(result.tool.output.presentationMeta({}, result.value).path, '.dsh-vision/picture-photo.png')
+
   // The picture occupies raster rows 175..1225 of the 1400 square at this scale, so the top of
-  // the frame is black and the middle is the picture.
+  // the frame is black and the middle is the picture. Both samples sit between two grid lines,
+  // so each reads the picture or the black rather than a line drawn over either.
   const { data } = await sharp(harness.saved[0].data).raw().toBuffer({ resolveWithObject: true })
   const pixel = (x, y) => {
     const at = (y * 1400 + x) * 3
     return [data[at], data[at + 1], data[at + 2]]
   }
-  const black = pixel(700, 40)
+  const black = pixel(656, 87)
   assert.ok(black[0] < 12 && black[1] < 12 && black[2] < 12, `the top of the square is black, got ${black}`)
-  const picture = pixel(700, 700)
+  const picture = pixel(656, 569)
   assert.ok(picture[0] > 20 && picture[2] > 30, `the middle is the picture, got ${picture}`)
+  // And the grid is drawn over the picture itself, which is what makes a place readable.
+  assert.notDeepEqual(pixel(350, 569), picture, 'the grid is drawn over the picture')
 })
 
 test('a row of marks comes back as a square window around them, not a strip', async (t) => {
-  const { imagePath } = await fixture(t)
+  const { dir, imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
-  const session = fakeSession()
+  const session = fakeSession(dir)
   const marks = [100, 200, 300, 400].map((x, index) => ({ at: [x, 300], r: 20, caption: `m${index + 1}` }))
   const result = await committedCall(harness, 'mark_add', { image: imagePath, marks }, session, 'row')
   assert.deepEqual(result.value.marked, [1, 2, 3, 4])
   assert.equal(result.value.window, '10,60,490,540')
   assert.equal(result.value.side, 480)
+  assert.equal(result.value.whole, false, 'a window around the marks, not the whole picture')
   const [x0, y0, x1, y1] = result.value.window.split(',').map(Number)
   assert.equal(x1 - x0, y1 - y0, 'the strip one face tall is what this redesign removed')
+  const spanX = Math.max(...marks.map((mark) => mark.at[0])) - Math.min(...marks.map((mark) => mark.at[0]))
+  assert.ok(x1 - x0 >= spanX * 1.5, 'a side wide enough for the row plus room around it')
   for (const mark of marks) {
-    assert.ok(mark.at[0] > x0 && mark.at[0] < x1)
-    assert.ok(mark.at[1] > y0 && mark.at[1] < y1)
+    // Room around every ring, not just its centre inside the frame: the answer is a view of
+    // the place that changed, with what is next to it whole.
+    assert.ok(mark.at[0] - mark.r > x0 && mark.at[0] + mark.r < x1, `the ring at ${mark.at} is inside and whole`)
+    assert.ok(mark.at[1] - mark.r > y0 && mark.at[1] + mark.r < y1, `the ring at ${mark.at} is inside and whole`)
   }
   assert.match(describeResult(result.value), /marked #1 #2 #3 #4/)
   assert.equal(result.value.record.length, 4)
 })
 
 test('the camera walks the sweep, and the text says how far it has got', async (t) => {
-  const { imagePath } = await fixture(t)
+  const { dir, imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
-  const session = fakeSession()
-  await committedCall(harness, 'camera_reset', { image: imagePath }, session, 'a')
+  const session = fakeSession(dir)
+  const whole = await committedCall(harness, 'camera_reset', { image: imagePath }, session, 'a')
+  assert.equal(whole.value.sweep, 'the whole picture is one window · `camera_zoom_in` to sweep it in windows')
+
   const closer = await committedCall(harness, 'camera_zoom_in', { image: imagePath }, session, 'b')
   assert.equal(closer.value.side, 400, 'one step halves the 800-pixel square')
-  assert.match(closer.value.sweep, /1 of 4 windows looked at/)
+  assert.equal(closer.value.window, '200,100,600,500')
+  assert.equal(closer.value.sweep,
+    '1 of 4 windows looked at · this one is bottom right · not yet: top left, top right, bottom left')
+
   const next = await committedCall(harness, 'camera_move', { image: imagePath, step: 'next' }, session, 'c')
-  assert.match(next.value.sweep, /2 of 4 windows looked at/)
-  assert.match(next.value.window, /^/, 'and a window came back')
+  assert.equal(next.value.sweep,
+    '2 of 4 windows looked at · this one is top left · not yet: top right, bottom left',
+    'the sweep counts the windows the camera stopped in, in reading order')
+  assert.match(next.value.window, /^-?\d+,-?\d+,-?\d+,-?\d+$/, 'and a window came back')
   assert.notEqual(next.value.window, closer.value.window, 'the camera moved')
+  assert.match(describeResult(next.value), /^sweep: 2 of 4 windows looked at/m,
+    'the text carries the same line the value does')
+
   const back = await committedCall(harness, 'camera_reset', { image: imagePath, marks: false }, session, 'd')
   assert.equal(back.value.marksShown, false, 'a clean canvas, on request')
+  assert.equal(back.value.window, '0,-100,800,700')
   assert.match(back.value.sweep, /the whole picture is one window/)
+  assert.match(describeResult(back.value), /no marks drawn/, 'and the text says the picture is clean')
 })
 
-test('the record is a fold: a committed call counts, a failed one does not', async (t) => {
-  const { imagePath } = await fixture(t)
+test('the record is a fold: a committed call counts, an errored result does not', async (t) => {
+  const { dir, imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
-  const session = fakeSession()
+  const session = fakeSession(dir)
   await committedCall(harness, 'mark_add', {
     image: imagePath, marks: [{ at: [120, 140], r: 20, caption: 'kept' }]
   }, session, 'one')
 
-  // A call that errors leaves no record: the fold reads the result's error, and the tool
-  // itself must report rather than half-apply.
-  session.append('tool/call', { turn: 2, step: 1, callId: 'bad', name: 'mark_add', arguments: '{"image":"x","marks":[]}' })
-  await assert.rejects(() => call(harness, 'mark_add', { image: imagePath, marks: [] }, session))
+  // The harness logs a call before dispatch and its result after it. These arguments would
+  // have been accepted, so nothing but the result's own error can keep the call out.
+  session.append('tool/call', {
+    turn: 2, step: 1, callId: 'bad', name: 'mark_add',
+    arguments: JSON.stringify({ image: imagePath, marks: [{ at: [500, 500], r: 20 }] })
+  })
   session.append('tool/result', {
     turn: 2,
     step: 1,
     message: { role: 'tool', toolCallId: 'bad', isError: true },
-    error: 'MARK_FAILED'
+    error: { name: 'Error', code: 'MARK_FAILED' }
   })
 
   const kept = await committedCall(harness, 'mark_add', {
     image: imagePath, marks: [{ at: [400, 300], r: 20 }]
   }, session, 'two')
-  assert.deepEqual(kept.value.marked, [2], 'the number after the failed call, not one it skipped')
+  assert.deepEqual(kept.value.marked, [2], 'the number after the errored call, not one it skipped')
   assert.equal(kept.value.record.length, 2)
   assert.equal(kept.value.marks, 2)
+  assert.ok(!kept.value.record.some((line) => line.includes('500,500')),
+    'the errored call put no mark in the record')
+
+  // A call still pending when its turn ended never produced a result at all: a killed process
+  // must not leave half a record behind.
+  session.append('tool/call', {
+    turn: 3, step: 1, callId: 'gone', name: 'mark_add',
+    arguments: JSON.stringify({ image: imagePath, marks: [{ at: [600, 400], r: 20 }] })
+  })
+  session.append('turn/end', { turn: 3, reason: { kind: 'interrupted' } })
+  const after = await call(harness, 'camera_reset', { image: imagePath }, session)
+  assert.equal(after.value.marks, 2, 'an unfinished call is dropped at turn end')
 })
 
 test('the arguments the model can send are the only ones accepted', async (t) => {
-  const { imagePath } = await fixture(t)
+  const { dir, imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
-  const session = fakeSession()
+  const session = fakeSession(dir)
   await assert.rejects(
     () => call(harness, 'camera_move', { image: imagePath }, session),
     /camera_move needs/)
@@ -385,9 +436,9 @@ test('the arguments the model can send are the only ones accepted', async (t) =>
 })
 
 test('a picture that cannot be stored is reported, and the record survives it', async (t) => {
-  const { imagePath } = await fixture(t)
+  const { dir, imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath, storeFails: true })
-  const session = fakeSession()
+  const session = fakeSession(dir)
   const result = await committedCall(harness, 'mark_add', {
     image: imagePath, marks: [{ at: [200, 200], r: 20 }]
   }, session, 'nostore')
@@ -398,14 +449,16 @@ test('a picture that cannot be stored is reported, and the record survives it', 
   assert.match(text, /the picture was not attached/)
 })
 
-test('the client half claims a row for every registered tool', async () => {
+test('the client half claims a row for every registered tool, and only those', async () => {
+  // A tool with no row still answers, but its picture never reaches the reader; adding a row
+  // for a tool that does not exist is a slot nobody can dispatch to. The two lists are one list.
   const harness = fakeHarness({ imagePath: 'x.jpg' })
   const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
-  const claimed = [...source.matchAll(/'([a-z_]+)'/g)].map((match) => match[1])
-  for (const tool of harness.tools.keys()) {
-    assert.ok(claimed.includes(tool), `the client half has no row for ${tool}: its picture would never show`)
-  }
-  assert.ok(claimed.includes('camera_reset') && claimed.includes('mark_add'))
+  const listed = /const TOOL_NAMES = \[([^\]]+)\]/.exec(source)
+  assert.ok(listed, 'the client half lists the tool names it claims')
+  const claimed = listed[1].split(',').map((name) => name.trim().replace(/^'|'$/g, '')).filter(Boolean)
+  assert.deepEqual(claimed.slice().sort(), [...harness.tools.keys()].sort(),
+    'the client half\'s TOOL_NAMES is the registered tool names')
 })
 
 test('the workflow is published as a skill, for a task that matches it', () => {
