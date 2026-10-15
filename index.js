@@ -450,7 +450,10 @@ export function apply(ctx) {
       'positions off the labels and never off the pixels of the image in front of you. ' +
       'Start here — a place is named from what you have seen. `region` is [x0, y0, x1, y1] read off ' +
       'those labels: leave it out for the whole picture, give a small one to read a face closely, or ' +
-      'give `regions` — several rectangles at once — to sweep a picture in a few calls. Read a ' +
+      'give `regions` — several rectangles at once — to sweep a picture in a few calls. The camera ' +
+      'stays where you leave it: every look shows what is in front of the lens, `zoom` and `move` ' +
+      'aim it, `reset` points it back at the whole picture, and every result says where it is. ' +
+      'Read a ' +
       'position by naming the line beside it and judging the gap by eye — there is no scale to work ' +
       'out — and treat this grid as the only ruler: do not crop the picture with another tool, or read ' +
       'a position off another view of it, whose pixels are a different size. The picture is drawn ' +
@@ -464,6 +467,20 @@ export function apply(ctx) {
       properties: {
         image: IMAGE_PARAMETER,
         region: REGION_PARAMETER,
+        reset: {
+          type: 'boolean',
+          description: 'Point the camera back at the whole picture.'
+        },
+        zoom: {
+          type: 'string',
+          description: 'Aim the camera closer or further: "in", "out", or a factor like "3" for a ' +
+            'specific change. It stays there — the next look shows the same place, closer.'
+        },
+        move: {
+          type: 'array',
+          items: { type: 'integer' },
+          description: 'Shift the camera by [dx, dy] in original pixels, relative to where it is now.'
+        },
         regions: {
           type: 'array',
           items: { type: 'array', items: { type: 'integer' } },

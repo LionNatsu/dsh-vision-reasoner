@@ -11,7 +11,7 @@ similar regions a note meant is another.
 
 | Tool | Purpose |
 |---|---|
-| `vision_look` | Look at the whole picture, at a rectangle of it given as `[x0, y0, x1, y1]` in original pixels, or at up to nine rectangles at once, which come back as one sheet of labelled tiles. Compare marks side by side; paint a colour out. The picture is drawn without the marks unless they are asked for. |
+| `vision_look` | Look at what the camera is pointed at: the whole picture, a rectangle of it given as `[x0, y0, x1, y1]` in original pixels, or up to nine rectangles at once, which come back as one sheet of labelled tiles. `zoom`, `move` and `reset` aim the camera, which stays where it is left. Compare marks side by side; paint a colour out. The picture is drawn without the marks unless they are asked for. |
 | `vision_mark` | Mark places by their coordinates, `at: [x, y]` in original pixels, with a size, a caption and a colour. |
 | `vision_unmark` | Delete marks by number, e.g. `[3, 7]`, when a mark is in the wrong place. |
 | `vision_edit` | Move, resize, recaption or recolour marks by number, in one call. |
@@ -109,6 +109,10 @@ withholding a picture over a failed lookup costs more than it protects.
   picture.
 - Every view is rendered at the same longest side, so looking at a rectangle is
   never coarser than looking at the whole picture.
+- The camera is a place, not an action. A look shows what is in front of the lens, `zoom` and
+  `move` aim it, `reset` points it back at the whole picture, and every result says where it is —
+  so a caller reads "closer, a little left" rather than inventing rectangles, and looking again
+  needs no arguments at all.
 - Marks are drawn only when asked for, so what is being read is the picture.
 - Every result lists the rectangles the picture has been looked at in, newest first, with how
   many marks are inside each, and names the ones left empty. A caller cannot see its own

@@ -245,7 +245,10 @@ test('every tool value satisfies its own declared output schema', async (t) => {
     ['vision_look', { image: imagePath, cover: 'green' }],
     ['vision_look', { image: imagePath, region: [100, 100, 400, 300], cover: 'all' }],
     // A sheet of rectangles: the value carries the same fields as any other look.
-    ['vision_look', { image: imagePath, regions: [[0, 0, 400, 300], [400, 0, 800, 300]] }]
+    ['vision_look', { image: imagePath, regions: [[0, 0, 400, 300], [400, 0, 800, 300]] }],
+    // Aiming the camera is part of looking, and its value carries the same fields.
+    ['vision_look', { image: imagePath, zoom: 'in' }],
+    ['vision_look', { image: imagePath, move: [-40, 25], marks: true }]
   ]
   for (const [toolName, args] of calls) {
     const { value, content } = await call(harness, toolName, args, session)

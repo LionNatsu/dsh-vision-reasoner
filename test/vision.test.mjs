@@ -15,6 +15,7 @@ import {
   marksInside
 } from '../lib/record.js'
 import { MAX_SHEET_TILES, describe as describeResult, planLook, planMark, recordLines } from '../lib/core.js'
+import { cameraOps, resolveCamera } from '../lib/camera.js'
 import { coordGridOverlay } from '../lib/draw.js'
 import { MAX_SHEET_PIXELS, VIEW_TARGET, clampRegion, sheetLayout, viewOf } from '../lib/render.js'
 import {
@@ -257,6 +258,52 @@ test('a comparison sheet puts the marks side by side', async () => {
   assert.match(compared.views[0].label, /#1 left, #2 right/)
 })
 
+test('the camera is aimed by the arguments, and resolved in the picture', () => {
+  assert.deepEqual(cameraOps({ zoom: 'in' }), [{ op: 'zoom', by: 2 }])
+  assert.deepEqual(cameraOps({ zoom: 'out' }), [{ op: 'zoom', by: 0.5 }])
+  assert.deepEqual(cameraOps({ zoom: '3' }), [{ op: 'zoom', by: 3 }])
+  assert.deepEqual(cameraOps({ move: [10.4, -20.6] }), [{ op: 'move', by: [10, -21] }])
+  assert.equal(cameraOps({ regions: [[0, 0, 10, 10]] })[0].op, 'reset', 'a sweep starts from the whole picture')
+  assert.deepEqual(cameraOps({}), [], 'a plain look aims nothing and stays where it is')
+  assert.throws(() => cameraOps({ zoom: 'closer' }), /zoom must be "in", "out" or a factor/)
+  assert.throws(() => cameraOps({ move: [1] }), /move must be \[dx, dy\] in original pixels/)
+
+  const whole = frameRegion(2400, 1600)
+  assert.deepEqual(resolveCamera([{ op: 'reset' }], 2400, 1600), whole)
+  assert.deepEqual(resolveCamera([{ op: 'zoom', by: 2 }], 2400, 1600),
+    { x0: 600, y0: 400, x1: 1800, y1: 1200 }, 'a step in halves the view about its centre')
+  assert.deepEqual(resolveCamera([{ op: 'zoom', by: 2 }, { op: 'move', by: [100, 50] }], 2400, 1600),
+    { x0: 700, y0: 450, x1: 1900, y1: 1250 }, 'and a move shifts it by original pixels')
+  assert.deepEqual(resolveCamera([{ op: 'move', by: [300, 200] }], 2400, 1600), whole,
+    'a view never leaves the picture')
+  const deep = resolveCamera(Array.from({ length: 12 }, () => ({ op: 'zoom', by: 2 })), 2400, 1600)
+  assert.equal(deep.x1 - deep.x0, 200, 'and never gets smaller than a twelfth of the longer side')
+})
+
+test('a look shows what the camera is pointed at', async () => {
+  const src = await source(2400, 1600)
+  const load = loadSource(src)
+  let record = emptyRecord('a.png')
+
+  const zoomed = await planLook({ record, args: { image: 'a.png', zoom: 'in' }, loadSource: load })
+  assert.equal(zoomed.result.region, '600,400,1800,1200')
+  // The frame of a 2400-wide picture is drawn at 0.58x, so one step in doubles that.
+  assert.match(describeResult(zoomed.result), /\(1\.2x of the picture\)/)
+
+  record = applyLookArgs(record, { image: 'a.png', zoom: 'in' })
+  const again = await planLook({ record, args: { image: 'a.png' }, loadSource: load })
+  assert.equal(again.result.region, '600,400,1800,1200', 'looking again shows where the camera is')
+
+  const moved = await planLook({ record, args: { image: 'a.png', move: [-300, -200] }, loadSource: load })
+  assert.equal(moved.result.region, '300,200,1500,1000')
+
+  const covered = await planLook({ record, args: { image: 'a.png', cover: 'green' }, loadSource: load })
+  assert.equal(covered.result.region, '600,400,1800,1200', 'covering needs no rectangle: it covers what is seen')
+
+  const back = await planLook({ record, args: { image: 'a.png', reset: true }, loadSource: load })
+  assert.equal(back.result.region, '0,0,2400,1600')
+})
+
 test('the mutating tools are the ones the fold replays', () => {
   assert.deepEqual(MUTATING_TOOLS, ['vision_mark', 'vision_unmark', 'vision_edit'])
   assert.deepEqual(TRACKED_TOOLS, ['vision_mark', 'vision_unmark', 'vision_edit', 'vision_look'],
@@ -265,7 +312,8 @@ test('the mutating tools are the ones the fold replays', () => {
 
 test('the ledger remembers the rectangles a look worked in', () => {
   assert.equal(askedRegionText([400, 300, 100, 200]), '100,200,400,300', 'either corner may be named first')
-  assert.equal(askedRegionText(['a', 1, 2, 3]), undefined, 'not a rectangle, so nothing to remember')
+  assert.equal(askedRegionText(undefined), undefined, 'nothing asked about, nothing to remember')
+  assert.throws(() => askedRegionText(['a', 1, 2, 3]), /region must be four numbers in original pixels/)
   let record = emptyRecord('a.png')
   record = applyLookArgs(record, { region: [0, 0, 900, 450] })
   record = applyLookArgs(record, { regions: [[900, 0, 1800, 450], [0, 0, 900, 450]] })

@@ -6,6 +6,7 @@
 |---|---|
 | `index.js` | Host half: registers the four tools, folds each record from the session log, stores the rendered pictures |
 | `lib/views.js` | The geometry a caller reads: a grid's step, the places on it, the rectangle a call means — all pure |
+| `lib/camera.js` | Where a caller is looking: the ops that aim it, folded from arguments, and their resolution into a rectangle |
 | `lib/record.js` | The mark record, the only functions that change it, and the conversion from a call's arguments to those functions |
 | `lib/core.js` | One call: validate, change the record, decide what to draw, write the text the caller reads |
 | `lib/draw.js` | The overlays, as SVG strings (pure) |
@@ -49,6 +50,18 @@ of how closely the picture is being looked at.
 Two scales rather than one, because a fitted view rounds its two dimensions
 independently.
 
+## The camera
+
+A caller is always looking somewhere. The camera is that place, and looking is how it is seen:
+`zoom` scales the view about its centre, `move` shifts it by original pixels, `reset` points it at
+the whole picture, and a `region` names the place outright. It is a fold of those ops taken from
+the arguments — as replayable as a mark, and carried across a restart — while *resolving* it into a
+rectangle needs the picture's dimensions, so that happens where the picture is at hand. A view
+never leaves the picture and never gets smaller than a twelfth of its longer side, below which
+there is nothing left to read. A `cover` with no rectangle covers what the camera sees, which is
+what makes "finish this part" one word.
+
+## The record
 ## The record
 
 ```json
@@ -115,7 +128,7 @@ the marks are committed by then.
 
 | Tool | Behaviour |
 |---|---|
-| `vision_look` | The whole picture, a rectangle of it, several rectangles at once, several marks side by side, or a colour painted out. Draws the marks only when asked |
+| `vision_look` | What the camera is pointed at — the whole picture, a rectangle, or several rectangles at once — aimed by `zoom`, `move` and `reset`; several marks side by side, or a colour painted out. Draws the marks only when asked |
 | `vision_mark` | Adds marks at the coordinates given, numbered in the order given |
 | `vision_unmark` | Deletes marks by number, through the same removal operation as `vision_edit` |
 | `vision_edit` | Moves, resizes, recaptions or recolours marks by number; one call takes many operations |
