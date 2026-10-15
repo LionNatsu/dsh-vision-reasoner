@@ -10,11 +10,15 @@ import assert from 'node:assert/strict'
 
 import sharp from 'sharp'
 
-import { MUTATING_TOOLS, applyToolArgs, emptyRecord, markPoint, markRect } from '../lib/record.js'
+import {
+  MUTATING_TOOLS, TRACKED_TOOLS, applyLookArgs, applyToolArgs, emptyRecord, markPoint, markRect,
+  marksInside
+} from '../lib/record.js'
 import { MAX_SHEET_TILES, describe as describeResult, planLook, planMark, recordLines } from '../lib/core.js'
 import { MAX_SHEET_PIXELS, VIEW_TARGET, clampRegion, sheetLayout, viewOf } from '../lib/render.js'
 import {
-  SIZES, frameRegion, gridLines, gridStep, placeAt, radiusFor, regionAround, regionOf, regionText
+  SIZES, askedRegionText, frameRegion, gridLines, gridStep, placeAt, radiusFor, regionAround, regionOf,
+  regionText
 } from '../lib/views.js'
 
 const frame = () => frameRegion(1200, 800)
@@ -231,4 +235,58 @@ test('a comparison sheet puts the marks side by side', async () => {
 
 test('the mutating tools are the ones the fold replays', () => {
   assert.deepEqual(MUTATING_TOOLS, ['vision_mark', 'vision_unmark', 'vision_edit'])
+  assert.deepEqual(TRACKED_TOOLS, ['vision_mark', 'vision_unmark', 'vision_edit', 'vision_look'],
+    'a look leaves the rectangles it worked in')
+})
+
+test('the ledger remembers the rectangles a look worked in', () => {
+  assert.equal(askedRegionText([400, 300, 100, 200]), '100,200,400,300', 'either corner may be named first')
+  assert.equal(askedRegionText(['a', 1, 2, 3]), undefined, 'not a rectangle, so nothing to remember')
+  let record = emptyRecord('a.png')
+  record = applyLookArgs(record, { region: [0, 0, 900, 450] })
+  record = applyLookArgs(record, { regions: [[900, 0, 1800, 450], [0, 0, 900, 450]] })
+  assert.deepEqual(record.looks, ['900,0,1800,450', '0,0,900,450'], 'newest first, each once')
+  record = applyLookArgs(record, {})
+  assert.equal(record.looks.length, 2, 'a look of the whole picture asks about nothing in particular')
+
+  record = applyToolArgs(record, 'vision_mark',
+    { image: 'a.png', marks: [{ at: [200, 200] }, { at: [1200, 200] }] })
+  assert.equal(marksInside(record, '0,0,900,450'), 1)
+  assert.equal(marksInside(record, '900,0,1800,450'), 1)
+})
+
+test('the text says how the picture on screen relates to the picture', () => {
+  const base = {
+    image: 'a.png',
+    picture: '2600x1831',
+    step: 200,
+    marksShown: true,
+    marks: 1,
+    looked: [{ region: '0,0,900,450', marks: 0 }],
+    record: ['#1 100,100 green'],
+    images: []
+  }
+  const whole = describeResult({
+    ...base,
+    region: '0,0,2600,1831',
+    views: [{ kind: 'frame', name: 'frame-a.png', label: '', width: 1400, height: 986 }]
+  })
+  assert.match(whole, /drawn 1400x986 \(0\.54x of the picture\)/)
+  assert.match(whole, /looked: 0,0,900,450 \(0\)/)
+  assert.match(whole, /nothing marked inside 0,0,900,450 yet/)
+
+  const close = describeResult({
+    ...base,
+    region: '0,0,300,200',
+    views: [{ kind: 'crop', name: 'crop-a.png', label: '', width: 1400, height: 933 }]
+  })
+  assert.match(close, /\(4\.7x of the picture\)/)
+
+  const sheet = describeResult({
+    ...base,
+    region: '0,0,2600,1831',
+    step: 0,
+    views: [{ kind: 'compare', name: 'sheet-2-a.png', label: '#1 0,0,900,450', width: 1900, height: 900 }]
+  })
+  assert.match(sheet, /drawn 1900x900 as a sheet of tiles/)
 })

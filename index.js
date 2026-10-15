@@ -11,7 +11,11 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { COLOURS, DEFAULT_COLOUR, MUTATING_TOOLS, applyToolArgs, emptyRecord, imageKey } from './lib/record.js'
+import {
+  COLOURS, DEFAULT_COLOUR, MUTATING_TOOLS, TRACKED_TOOLS, applyLookArgs, applyToolArgs, emptyRecord,
+  imageKey
+} from './lib/record.js'
+import { SKILL } from './lib/skill.js'
 import {
   MAX_SHEET_TILES, describe as describeResult, planEdit, planLook, planMark, planUnmark
 } from './lib/core.js'
@@ -38,8 +42,9 @@ const SOURCE_CACHE_LIMIT = 8
 const VIEW_DIR = '.dsh-vision'
 const COLOUR_NAMES = Object.keys(COLOURS)
 
-/** The tools the fold replays; everything else only reads the record. */
+/** The tools that change the record, and the looks whose rectangles it remembers. */
 const MUTATING = new Set(MUTATING_TOOLS)
+const TRACKED = new Set(TRACKED_TOOLS)
 
 const IMAGE_VALUE_SCHEMA = {
   type: 'object',
@@ -83,6 +88,18 @@ const PICTURE_RESULT_PROPERTIES = {
     description: 'The grid step in original pixels (0 when the picture carries no grid).'
   },
   marksShown: { type: 'boolean', required: true },
+  looked: {
+    type: 'array',
+    required: true,
+    description: 'The rectangles this picture has been looked at in, newest first, with how many ' +
+      'marks are inside each.',
+    items: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['region', 'marks'],
+      properties: { region: { type: 'string' }, marks: { type: 'integer' } }
+    }
+  },
   record: { type: 'array', required: true, items: { type: 'string' } },
   views: { type: 'array', required: true, items: VIEW_VALUE_SCHEMA },
   images: { type: 'array', required: true, items: IMAGE_VALUE_SCHEMA },
@@ -180,9 +197,10 @@ function createRecordFolder() {
   function commit(state, pending) {
     const record = state.images[pending.key] ?? emptyRecord(pending.label)
     try {
-      state.images[pending.key] = applyToolArgs(record, pending.tool, pending.args)
+      state.images[pending.key] = MUTATING.has(pending.tool)
+        ? applyToolArgs(record, pending.tool, pending.args)
+        : applyLookArgs(record, pending.args)
     } catch {
-      // The call failed validation, so the tool threw the same way and changed
       // nothing. A replay has to agree with that, not guess.
     }
   }
@@ -193,7 +211,7 @@ function createRecordFolder() {
       for (const event of session.snapshotEvents(state.seq, session.seq)) {
         if (event.type === 'tool/call') {
           const data = event.data
-          if (!MUTATING.has(data.name)) continue
+          if (!TRACKED.has(data.name)) continue
           let args
           try {
             args = JSON.parse(data.arguments)
@@ -285,6 +303,14 @@ async function attachBlocker(ctx, exec, session) {
 export function apply(ctx) {
   const records = createRecordFolder()
   const sources = new Map()
+
+  // The workflow has to reach the model before the work starts: pointing inside reasoning
+  // is a mode it does not enter on its own, and tool descriptions are read while deciding
+  // whether to call a tool at all. A skill is read when a task matches one.
+  const skills = ctx.get('skills')
+  if (skills !== undefined && typeof skills.register === 'function') {
+    ctx.effect(() => skills.register(SKILL))
+  }
 
   /** Read one picture through `ctx.fs`, cached by the version it reports. */
   async function loadSource(image, exec) {

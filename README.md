@@ -24,6 +24,11 @@ the coordinates of every mark, so a mark placed twice, or in the wrong spot, is
 visible in the next answer rather than several calls later. The tools never count
 or judge what is in a picture: that is the model's statement to make.
 
+The package also publishes a skill, `vision-sweep-count`: the workflow this tool set was
+built around — look, sweep in rectangles, mark as you read, finish each rectangle with
+`cover`. A model reads a skill when a task matches one, which matters here because
+pointing inside reasoning is a mode a model does not enter on its own.
+
 ## Install
 
 ```
@@ -105,6 +110,13 @@ withholding a picture over a failed lookup costs more than it protects.
 - Every view is rendered at the same longest side, so looking at a rectangle is
   never coarser than looking at the whole picture.
 - Marks are drawn only when asked for, so what is being read is the picture.
+- Every result lists the rectangles the picture has been looked at in, newest first, with how
+  many marks are inside each, and names the ones left empty. A caller cannot see its own
+  coverage, and a rectangle it went through and forgot is where a missing row comes from.
+- The view line says how the drawing relates to the picture — `drawn 1400x986 (0.54x of the
+  picture)` — because a caller that reads the rendering as the picture itself is wrong by
+  exactly that ratio. One session reported reading a "1540x1084 preview" while every number
+  it had was in a 2600-pixel space.
 - A sheet is the only way to put several places in one picture, because pictures
   received separately cannot be compared. Its cells take the shape of the tiles they
   hold, so a row of wide tiles is not padded into squares, and it holds at most nine

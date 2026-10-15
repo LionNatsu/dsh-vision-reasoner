@@ -401,7 +401,8 @@ test('a picture is attached, and its path is reported when the backend has one',
   assert.equal(content[1].attachment.attachmentId, 'attachment-1')
   assert.match(content[0].text, /no marks yet/)
   assert.match(content[0].text, /\(800x600\)/, 'the picture\'s own size, in original pixels')
-  assert.match(content[0].text, /view 0,0,800,600 — grid every 50 original pixels, marks drawn/)
+  assert.match(content[0].text,
+    /view 0,0,800,600 — drawn 1400x1050 \(1\.8x of the picture\), grid every 50 original pixels, marks drawn/)
   assert.match(content[0].text, /saved as \.dsh-vision\/frame-photo\.png \(1400x1050\)/)
 })
 
@@ -472,6 +473,47 @@ test('a caller with no session is refused, not silently ignored', async (t) => {
     () => call(harness, 'vision_mark', { image: imagePath, marks: [{ at: [10, 10] }] }, undefined),
     /needs an owning agent session/
   )
+})
+
+test('a look leaves a rectangle in the ledger, so a caller can see where it has been', async (t) => {
+  const { imagePath } = await fixture(t)
+  const harness = fakeHarness({ imagePath })
+  const session = fakeSession()
+  await committedCall(harness, 'vision_look', { image: imagePath, region: [0, 0, 400, 300] }, session, 'look-1')
+  const swept = await committedCall(harness, 'vision_look',
+    { image: imagePath, regions: [[400, 0, 800, 300], [0, 0, 400, 300]] }, session, 'look-2')
+  assert.deepEqual(swept.value.looked.map((entry) => entry.region), ['400,0,800,300', '0,0,400,300'],
+    'a sweep sees its own rectangles, not only the ones already committed')
+  assert.match(swept.content[0].text, /looked: 400,0,800,300 \(0\) · 0,0,400,300 \(0\)/)
+
+  // Once anything is marked, a rectangle that has been through and left empty is the one
+  // thing a caller cannot notice on its own.
+  await committedCall(harness, 'vision_mark', { image: imagePath, marks: [{ at: [200, 150] }] }, session, 'mark-1')
+  const after = await call(harness, 'vision_look', { image: imagePath }, session)
+  assert.deepEqual(after.value.looked,
+    [{ region: '400,0,800,300', marks: 0 }, { region: '0,0,400,300', marks: 1 }])
+  assert.match(after.content[0].text, /nothing marked inside 400,0,800,300 yet/)
+})
+
+test('the workflow is published as a skill, for a task that matches it', () => {
+  const registered = []
+  const tools = new Map()
+  apply({
+    tools: { register: (definition) => { tools.set(definition.name, definition); return () => {} } },
+    fs: {},
+    emit() {},
+    effect: (callback) => callback(),
+    get: (service) => (service === 'skills'
+      ? { register: (skill) => { registered.push(skill); return () => {} } }
+      : undefined)
+  })
+  assert.equal(registered.length, 1)
+  const skill = registered[0]
+  assert.equal(skill.name, 'vision-sweep-count')
+  assert.match(skill.whenToUse, /how many/)
+  assert.match(skill.description, /sweep it in rectangles/)
+  assert.match(skill.content, /cover: "green"/, 'the check that finds what is unmarked')
+  assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
 })
 
 test('the arguments the model can send are the only ones accepted', async (t) => {

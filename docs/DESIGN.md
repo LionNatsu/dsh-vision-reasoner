@@ -75,6 +75,12 @@ of pixels, so there is nothing to measure. The live path passes the picture's
 dimensions only to refuse a place outside it, which is a refusal, not a value — a
 call that was refused never committed, so the two paths cannot disagree.
 
+A look is folded too, when it names a rectangle: the ledger of where a picture has been
+looked at, newest first, each once, is what lets a result say which rectangles are still empty.
+The rectangles come from the arguments, so this is as replayable as a mark, and a mark call
+carries them forward — an applier that rebuilt a record without the ledger would silently drop
+the coverage a caller was relying on.
+
 Reads are incremental: only the events appended since the last read are folded,
 cached per session id.
 
@@ -122,7 +128,9 @@ ratio, because square cells around wide tiles double a sheet's pixels to show th
 same picture. A sweep is the shape a counting task needs: one call for a band of the
 picture, then a `cover` of the same rectangle to find what the band still shows.
 
-Every result carries the same things: the picture's size, the rectangle drawn, the
+Every result carries the same things: the picture's size, the rectangle drawn, how the drawing
+relates to that rectangle (`drawn 1400x986 (0.54x of the picture)`, or `as a sheet of tiles`),
+the ledger of looked rectangles with the marks inside each, the
 grid's step, whether the marks are drawn, and the whole record as one line per mark
 with its coordinates. A mark and a move report the picture drawn *around what was
 just changed*, so the caller sees the result of its own change without a second
@@ -132,6 +140,15 @@ tool because a caller should never have to ask what it has already been told.
 `vision_mark`, `vision_unmark` and `vision_edit` leave `isConcurrencySafe`
 undeclared, so the registry schedules them exclusively: two calls editing one record
 must not interleave, or two marks would be handed the same number.
+
+## The skill
+
+`lib/skill.js` publishes one skill, `vision-sweep-count`, through `ctx.get('skills')` when the
+composition has that service: sweep in rectangles, mark as you read, finish each rectangle with
+`cover`, count the record. The tool descriptions are read while deciding whether to call a tool;
+a skill is read when a task matches one, which is the channel that reaches the model before it
+starts. The skill is registered from the calling context's layer, so a profile that mounts this
+package offers it to every session in that profile.
 
 ## Reading the picture
 
