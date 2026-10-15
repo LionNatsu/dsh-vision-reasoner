@@ -39,7 +39,7 @@ of how closely the picture is being looked at.
 - A ring radius is a number of original pixels (30 unless the caller says otherwise), not a
   fraction of the view: a radius that depended on the view would change the ring a caller had
   already placed.
-- `MAX_VIEW_DIMENSION` caps every view, sheets included.
+- Every view is a square (`VIEW_SIDE`, 1400), capped by `MAX_VIEW_DIMENSION` like any drawing.
 - Line widths have a floor of 2-3 pixels and scale with the view: the attachment
   pipeline re-encodes a view, and hairlines do not survive it.
 - `applyMarkArgs` and `applyUpdateArgs` throw on bad input rather than repairing it:
@@ -52,13 +52,18 @@ independently.
 
 ## The camera
 
-A caller is always looking somewhere. The camera is that place, and looking is how it is seen:
-`zoom` scales the view about its centre, `move` shifts it by original pixels, `reset` points it at
-the whole picture, and a `region` names the place outright. It is a fold of those ops taken from
-the arguments — as replayable as a mark, and carried across a restart — while *resolving* it into a
-rectangle needs the picture's dimensions, so that happens where the picture is at hand. A view
-never leaves the picture and never gets smaller than a twelfth of its longer side, below which
-there is nothing left to read.
+A caller is always looking somewhere, and a camera does not stop seeing: there is no "look" verb,
+because every action on the camera returns what it now sees. The camera is a fold of ops taken
+from the arguments — `reset`, `zoom` by a factor, `move` by a step or to a place, and the `fit` a
+mark call performs — so it is as replayable as a mark and survives a restart, while *resolving* it
+into a window needs the picture's dimensions and therefore happens where the picture is at hand.
+
+It is a square window, never smaller than `MIN_SIDE` (64) and never larger than the picture's
+longer side, positioned by its centre within the picture's bounds; the window itself may reach
+past an edge, and what is outside the picture is black. The sweep is read off the same fold: the
+windows tile the picture *centred on it*, so the widest window is exactly the first cell of its own
+sweep, and a cell counts as looked at when the camera **stopped** in it — not when it passed over
+it. A reset clears the count, because a swept picture that is reset is a picture being swept again.
 
 ## The record
 ## The record
@@ -127,29 +132,29 @@ the marks are committed by then.
 
 | Tool | Behaviour |
 |---|---|
-| `vision_look` | What the camera is pointed at — the whole picture, a rectangle, or several rectangles at once — aimed by `zoom`, `move` and `reset`; several marks side by side, or a colour painted out. Draws the marks only when asked |
-| `vision_mark` | Adds marks at the coordinates given, numbered in the order given |
-| `vision_unmark` | Deletes marks by number, through the same removal operation as `vision_edit` |
-| `vision_edit` | Moves, resizes, recaptions or recolours marks by number; one call takes many operations |
+| `camera_reset` | Points the camera at the whole picture: one square window holding all of it |
+| `camera_move` | `step` walks the sweep in reading order or by direction; `to: [x, y]` puts the window's centre on a place |
+| `camera_zoom_in` / `camera_zoom_out` | Halves or doubles the window about its centre, `times` steps at once |
+| `mark_add` | Adds marks at the coordinates given, numbered in the order given, and sends the camera to them |
+| `mark_remove` | Deletes marks by number, through the same removal operation as `mark_edit` |
+| `mark_edit` | Moves, resizes, recaptions or recolours marks by number; one call takes many operations |
 
-A look that names several rectangles renders each at `TILE` and assembles one sheet
-labelled with each rectangle, capped at `MAX_SHEET_TILES` — nine tiles at 620 pixels
-fit under the attachment pipeline's downscale threshold, and a tenth would buy a
-smaller picture rather than a bigger one. Sheet cells follow the tiles' mean aspect
-ratio, because square cells around wide tiles double a sheet's pixels to show the
-same picture. A sweep is the shape a counting task needs: one call for a band of the
-picture, then a `marks: true` look at the same place to find what the band still shows.
+There is one view shape and no verb that picks it: a 1400x1400 square, always. The picture is
+placed inside it at the scale that fits and whatever is left over is black, so a view can never
+come back as a strip — the failure this redesign answers was a feedback view of 676x115 for a row
+of ten marks, whose faces were cut off at the chin; the model could not verify its own rings,
+fell back on arithmetic across two renderings, and invented a 71-pixel offset that moved marks
+which were already right.
 
-Every result carries the same things: the picture's size, the rectangle drawn, how the drawing
-relates to that rectangle (`drawn 1400x986 (0.54x of the picture)`, or `as a sheet of tiles`),
-the ledger of looked rectangles with the marks inside each, the
-grid's step, whether the marks are drawn, and the whole record as one line per mark
-with its coordinates. A mark and a move report the picture drawn *around what was
-just changed*, so the caller sees the result of its own change without a second
-look — the whole picture when the change is spread across it. `vision_list` is not a
-tool because a caller should never have to ask what it has already been told.
+Every result carries the same things: the picture's size, the window the camera looks through,
+how the drawing relates to it (`drawn 1400x1400 (1.08x of the picture)`), the grid's step,
+whether the marks are drawn, how far the sweep has got in words, and the whole record as one line
+per mark with its coordinates. A mark reports the window *around what was just changed*, so the
+caller sees the result of its own change without a second call. There is no `vision_list`: a
+caller should never have to ask what it has already been told, and no `vision_look`: a camera
+does not stop seeing, so every action on it returns what it now sees.
 
-`vision_mark`, `vision_unmark` and `vision_edit` leave `isConcurrencySafe`
+`mark_add`, `mark_remove` and `mark_edit` leave `isConcurrencySafe`
 undeclared, so the registry schedules them exclusively: two calls editing one record
 must not interleave, or two marks would be handed the same number.
 

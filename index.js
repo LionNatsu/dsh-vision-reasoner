@@ -1,9 +1,8 @@
 /**
  * dsh-vision-reasoner (Host half).
  *
- * Registers the four tools, keeps each record as a fold of the session log, and
- * stores the rendered views. This file is the wiring; the reasoning is in
- * docs/DESIGN.md.
+ * Registers the seven tools, keeps each record as a fold of the session log, and stores
+ * the rendered views. This file is the wiring; the reasoning is in docs/DESIGN.md.
  *
  * @module dsh-vision-reasoner
  */
@@ -12,22 +11,19 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
-  COLOURS, DEFAULT_COLOUR, MUTATING_TOOLS, TRACKED_TOOLS, applyLookArgs, applyToolArgs, emptyRecord,
-  imageKey
+  COLOURS, DEFAULT_COLOUR, TRACKED_TOOLS, commitCall, emptyRecord, imageKey
 } from './lib/record.js'
 import { SKILL } from './lib/skill.js'
-import {
-  MAX_SHEET_TILES, describe as describeResult, planEdit, planLook, planMark, planUnmark
-} from './lib/core.js'
+import { describe as describeResult, planCamera, planEdit, planMark, planUnmark } from './lib/core.js'
 import { probeImageSize } from './lib/render.js'
 
 export const name = 'vision-reasoner'
 
 /**
- * `tools` to register the four tools, `fs` to read the picture through the
- * harness's own sandboxed path. `attachments` and `llm` are consulted when
- * present and never required: a composition without them can still keep the
- * record, it just cannot show the picture.
+ * `tools` to register the seven tools, `fs` to read the picture through the harness's
+ * own sandboxed path. `attachments` and `llm` are consulted when present and never
+ * required: a composition without them can still keep the record, it just cannot show the
+ * picture.
  */
 export const inject = ['tools', 'fs']
 
@@ -42,8 +38,7 @@ const SOURCE_CACHE_LIMIT = 8
 const VIEW_DIR = '.dsh-vision'
 const COLOUR_NAMES = Object.keys(COLOURS)
 
-/** The tools that change the record, and the looks whose rectangles it remembers. */
-const MUTATING = new Set(MUTATING_TOOLS)
+/** Every tool whose call the fold replays. */
 const TRACKED = new Set(TRACKED_TOOLS)
 
 const IMAGE_VALUE_SCHEMA = {
@@ -66,7 +61,7 @@ const VIEW_VALUE_SCHEMA = {
   additionalProperties: false,
   required: ['kind', 'name', 'width', 'height'],
   properties: {
-    kind: { type: 'string', enum: ['frame', 'crop', 'sheet'] },
+    kind: { type: 'string', enum: ['picture', 'window'] },
     name: { type: 'string' },
     label: { type: 'string' },
     width: { type: 'integer' },
@@ -74,13 +69,22 @@ const VIEW_VALUE_SCHEMA = {
   }
 }
 
-/** What every call reports: the record it changed, and the rectangle it drew. */
+/** What every call reports: the record it changed, and the window it was seen through. */
 const PICTURE_RESULT_PROPERTIES = {
   picture: { type: 'string', required: true, description: 'The picture\'s size in original pixels, `2600x1831`.' },
-  region: {
+  window: {
     type: 'string',
     required: true,
-    description: 'The rectangle drawn, `0,0,2600,1831`, in original pixels.'
+    description: 'The square the camera looks through, `650,0,1950,1300`, in original pixels. It may reach ' +
+      'past the picture\'s edge, and what is outside the picture is black.'
+  },
+  side: { type: 'integer', required: true, description: 'The window\'s side, in original pixels.' },
+  whole: { type: 'boolean', required: true, description: 'True when the window holds the whole picture.' },
+  scale: {
+    type: 'string',
+    required: true,
+    description: 'How much bigger the drawing is than the picture, `1.08x`. Every view is drawn square, ' +
+      '1400x1400, whatever the window.'
   },
   step: {
     type: 'integer',
@@ -88,17 +92,11 @@ const PICTURE_RESULT_PROPERTIES = {
     description: 'The grid step in original pixels (0 when the picture carries no grid).'
   },
   marksShown: { type: 'boolean', required: true },
-  looked: {
-    type: 'array',
+  sweep: {
+    type: 'string',
     required: true,
-    description: 'The rectangles this picture has been looked at in, newest first, with how many ' +
-      'marks are inside each.',
-    items: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['region', 'marks'],
-      properties: { region: { type: 'string' }, marks: { type: 'integer' } }
-    }
+    description: 'How far the sweep has got: how many windows have been stopped in, which one this is, ' +
+      'and which are left.'
   },
   record: { type: 'array', required: true, items: { type: 'string' } },
   views: { type: 'array', required: true, items: VIEW_VALUE_SCHEMA },
@@ -130,14 +128,31 @@ const IMAGE_PARAMETER = {
   description: 'Path to the picture. A relative path resolves against the session working directory.'
 }
 
-const REGIONS_PARAMETER = {
+const TIMES_PARAMETER = {
+  type: 'integer',
+  description: 'How many steps at once, 1 to 8 (default 1).'
+}
+
+const STEP_PARAMETER = {
+  type: 'string',
+  enum: ['next', 'previous', 'left', 'right', 'up', 'down'],
+  description: 'One whole window that way. "next" walks the sweep in reading order — left to right, then ' +
+    'the row below — and "previous" steps back.'
+}
+
+const TO_PARAMETER = {
   type: 'array',
-  items: { type: 'array', items: { type: 'integer' } },
-  description: `One to ${MAX_SHEET_TILES} rectangles, e.g. [[0, 0, 900, 450], [900, 0, 1800, 450]], each ` +
-    '[x0, y0, x1, y1] in original pixels read off the labelled grid lines. One points the camera there; ' +
-    'several come back as one sheet of tiles, each labelled with its rectangle — a whole picture swept ' +
-    'in a few calls. Read a tile, mark what is in it, then look again with `marks: true` to see what ' +
-    'is still unmarked.'
+  items: { type: 'integer' },
+  description: 'Where the window\'s centre goes: `[x, y]` in the picture\'s own pixels, read off the grid. ' +
+    'A place, never an offset to work out, and it may sit near an edge: the part of the window past the ' +
+    'picture is black.'
+}
+
+const MARKS_PARAMETER = {
+  type: 'boolean',
+  description: 'Draw the marks on the picture. Default true — the picture carries the record, so a mark you ' +
+    'placed is in the next view. Pass false for a clean canvas, counting a place again from scratch for ' +
+    'instance.'
 }
 
 const AT_PARAMETER = {
@@ -199,9 +214,9 @@ function createRecordFolder() {
   function commit(state, pending) {
     const record = state.images[pending.key] ?? emptyRecord(pending.label)
     try {
-      state.images[pending.key] = MUTATING.has(pending.tool)
-        ? applyToolArgs(record, pending.tool, pending.args)
-        : applyLookArgs(record, pending.args)
+      // No picture size here: the fold is replayed from the log alone, and every aim a call
+      // records is already free of dimensions.
+      state.images[pending.key] = commitCall(record, pending.tool, pending.args).record
     } catch {
       // nothing. A replay has to agree with that, not guess.
     }
@@ -434,49 +449,58 @@ export function apply(ctx) {
   }
 
   ctx.tools.register({
-    name: 'vision_look',
+    name: 'camera_reset',
     description:
-      'See the picture, or a part of it, with a grid of the picture\'s own pixel coordinates drawn on ' +
-      'it and every line labelled: a number you read is a number you can use. What arrives is a ' +
-      'rendering — the picture comes back at a size this tool chose, not the picture\'s own, so read ' +
-      'positions off the labels and never off the pixels of the image in front of you. ' +
-      'Start here — a place is named from what you have seen. `regions` is one to nine rectangles in ' +
-      'those pixels: one points the camera there, several come back as one sheet of labelled tiles, ' +
-      'which is how a whole picture is swept in a few calls. The camera stays where you leave it: every ' +
-      'look shows what is in front of the lens, `zoom` and `move` aim it, `reset` points it back at the ' +
-      'whole picture, and every result says where it is — so looking again needs no arguments. ' +
-      'Read a position by naming the line beside it and judging the gap by eye — there is no scale to work ' +
-      'out — and treat this grid as the only ruler: do not crop the picture with another tool, or read ' +
-      'a position off another view of it, whose pixels are a different size. The picture is drawn ' +
-      'without your marks unless you ask for `marks: true`, which is how you see what is already ' +
-      'marked; the `looked:` line beside it says which rectangles you have been through and how many ' +
-      'marks are in each.',
+      'Point the camera at the whole picture and see it: one square window holding all of it. Start here. ' +
+      'The window is a square of the picture\'s own pixels and the picture is drawn inside it at ' +
+      'the scale that fits; whatever is left over is outside the picture and black. ' +
+      'The grid lines are labelled with the picture\'s own pixel coordinates, and a number you read is a ' +
+      'number you can use — read positions off the labels, never off the pixels of the image in front of ' +
+      'you, which is a rendering at a size this tool chose. Treat this grid as the only ruler: do not crop ' +
+      'the picture with another tool, or read a position off another view of it. This window is the first ' +
+      'cell of a sweep over the picture; `camera_move` with "next" walks the rest, and every result says ' +
+      'how far the sweep has got and which cells are left.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['image'],
+      properties: { image: IMAGE_PARAMETER, marks: MARKS_PARAMETER }
+    },
+    output: {
+      schema: recordResultSchema({}),
+      render: (_args, value) => renderContent(value),
+      presentationMeta: (_args, value) => presentationMetaOf(value)
+    },
+    execute: run(planCamera('camera_reset')),
+    presentCall: (args) => ({
+      card: 'generic',
+      title: `The whole picture: ${args.image}`,
+      kind: 'read',
+      locations: [{ path: args.image }]
+    })
+  })
+
+  ctx.tools.register({
+    name: 'camera_move',
+    description:
+      'Move the camera and see what it looks at now. `step` moves one whole window — "next" walks the ' +
+      'sweep in reading order, left to right and then the row below — and `to` puts the window\'s centre ' +
+      'on a place you read off the grid. Give one, or a place and then a step. The windows tile the ' +
+      'picture from its top-left corner: as many across and down as it takes at the current size, which ' +
+      'every result states, along with which cell the camera is in, how many have been stopped in since ' +
+      'the last reset, and which are left. A cell counts as looked at when the camera stopped in it. ' +
+      'The window is a square of the picture\'s own pixels and the picture is drawn inside it at ' +
+      'the scale that fits; whatever is left over is outside the picture and black. ' +
+      '',
     parameters: {
       type: 'object',
       additionalProperties: false,
       required: ['image'],
       properties: {
         image: IMAGE_PARAMETER,
-        regions: REGIONS_PARAMETER,
-        reset: {
-          type: 'boolean',
-          description: 'Point the camera back at the whole picture.'
-        },
-        zoom: {
-          type: 'string',
-          description: 'Aim the camera closer or further: "in", "out", or a factor like "3" for a ' +
-            'specific change. It stays there — the next look shows the same place, closer.'
-        },
-        move: {
-          type: 'array',
-          items: { type: 'integer' },
-          description: 'Shift the camera by [dx, dy] in original pixels, relative to where it is now.'
-        },
-        marks: {
-          type: 'boolean',
-          description: 'Draw every mark placed so far (default false: the picture is what is being read). ' +
-            'Marks stay from call to call and are drawn at whatever rectangle and scale you look at.'
-        }
+        step: STEP_PARAMETER,
+        to: TO_PARAMETER,
+        marks: MARKS_PARAMETER
       }
     },
     output: {
@@ -484,37 +508,84 @@ export function apply(ctx) {
       render: (_args, value) => renderContent(value),
       presentationMeta: (_args, value) => presentationMetaOf(value)
     },
-    execute: run(planLook),
+    execute: run(planCamera('camera_move')),
     presentCall: (args) => ({
       card: 'generic',
-      title: Array.isArray(args.regions)
-        ? `Look at ${args.regions.length} rectangle(s)`
-        : args.reset === true
-          ? 'Look at the whole picture'
-          : `Look at ${args.image}`,
+      title: args.step === undefined ? `Camera to ${args.to?.join(',') ?? args.image}` : `Camera ${args.step}`,
       kind: 'read',
       locations: [{ path: args.image }]
     })
   })
 
   ctx.tools.register({
-    name: 'vision_mark',
+    name: 'camera_zoom_in',
     description:
-      'Mark what you have decided, as you decide it: a mark STAYS on the picture — every later look ' +
-      'draws it, of the whole picture or of any rectangle of it, however closely you look — so the ' +
-      'marks you have placed are what you read instead of remembering, and a batch typed at the end is ' +
-      'where doubles and misses come from. LOOK FIRST — mark what you can see in a picture you have ' +
-      'looked at with vision_look; never a position worked out from anywhere else. `at` is [x, y] in ' +
-      'the picture\'s own pixels, read off the labelled lines. Every mark comes back drawn at once, ' +
-      'with a cross at each centre, around what you just marked: read that picture before you go on. ' +
-      'A ring that is off is moved by vision_edit or deleted by vision_unmark in the same breath — a ' +
-      'wrong ring misleads every later look, and clearing it costs less than reasoning around it. ' +
-      'Two or three at a time is the useful ' +
-      'size: a place read from a close view is good to a few pixels, where one read from the whole ' +
-      'picture is good to tens. ' +
-      'Spread them further and it comes back one tile per mark instead. Every result lists the whole ' +
-      'record, so a ring that missed its face, a double or a wrong one shows at once. Nothing here counts ' +
-      'or judges what the picture holds — that is your statement to make.',
+      'Zoom in: the window halves on each step, about its centre, so nothing drifts away from what you ' +
+      'were looking at. `times` takes several steps at once. ' +
+      'The window is a square of the picture\'s own pixels and the picture is drawn inside it at ' +
+      'the scale that fits; whatever is left over is outside the picture and black. ' +
+      'Every result gives the window\'s side and the scale it is drawn at, and a window never gets ' +
+      'smaller than 64 original pixels across.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['image'],
+      properties: { image: IMAGE_PARAMETER, times: TIMES_PARAMETER, marks: MARKS_PARAMETER }
+    },
+    output: {
+      schema: recordResultSchema({}),
+      render: (_args, value) => renderContent(value),
+      presentationMeta: (_args, value) => presentationMetaOf(value)
+    },
+    execute: run(planCamera('camera_zoom_in')),
+    presentCall: (args) => ({
+      card: 'generic',
+      title: `Closer${args.times === undefined ? '' : ` x${args.times}`}: ${args.image}`,
+      kind: 'read',
+      locations: [{ path: args.image }]
+    })
+  })
+
+  ctx.tools.register({
+    name: 'camera_zoom_out',
+    description:
+      'Zoom out: the window doubles on each step, about its centre — the step between this view and the ' +
+      'whole picture, which `camera_reset` gives in one go. `times` takes several steps at once. ' +
+      'Every result gives the window\'s side and the scale it is drawn at.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['image'],
+      properties: { image: IMAGE_PARAMETER, times: TIMES_PARAMETER, marks: MARKS_PARAMETER }
+    },
+    output: {
+      schema: recordResultSchema({}),
+      render: (_args, value) => renderContent(value),
+      presentationMeta: (_args, value) => presentationMetaOf(value)
+    },
+    execute: run(planCamera('camera_zoom_out')),
+    presentCall: (args) => ({
+      card: 'generic',
+      title: `Further${args.times === undefined ? '' : ` x${args.times}`}: ${args.image}`,
+      kind: 'read',
+      locations: [{ path: args.image }]
+    })
+  })
+
+  ctx.tools.register({
+    name: 'mark_add',
+    description:
+      'Mark what you have decided, as you decide it. A mark STAYS on the picture — every later view draws ' +
+      'it — so the marks you have placed are what you read instead of remembering, and a batch typed at ' +
+      'the end is where doubles and misses come from. `at` is [x, y] in the picture\'s own pixels, read ' +
+      'off the labelled grid: LOOK FIRST, and mark only what you have seen, never a position worked out ' +
+      'from anywhere else. Two or three at a time is the useful size. The camera moves to what you marked, ' +
+      'and the answer is a square window around those marks with a cross at each centre: read it before ' +
+      'you go on, and fix what is off in the same breath — a wrong ring misleads every later view, and ' +
+      'clearing it costs less than reasoning around it. `r` is the ring\'s radius in original pixels ' +
+      '(default 30; a face is about 60). Every result lists the whole record, so a ring that missed its ' +
+      'face, a double or a wrong one shows at once. Nothing here counts or judges what the picture holds — ' +
+      'that is your statement to make.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -545,11 +616,11 @@ export function apply(ctx) {
   })
 
   ctx.tools.register({
-    name: 'vision_unmark',
+    name: 'mark_remove',
     description:
-      'Delete marks by number, e.g. [3, 7]. Use it as soon as a mark is wrong — a number left in the ' +
-      'record still reads as a place you have already dealt with, and the mistake becomes invisible in ' +
-      'the list. The whole picture comes back, with the record.',
+      'Delete marks by number, e.g. [3, 7] — as soon as one is wrong, not at the end: a number left in the ' +
+      'record still reads as a place you have already dealt with, and the mistake becomes invisible in the ' +
+      'list. The answer is a window around what was removed, with the record.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -581,13 +652,13 @@ export function apply(ctx) {
   })
 
   ctx.tools.register({
-    name: 'vision_edit',
+    name: 'mark_edit',
     description:
       'Correct marks that are nearly right: move one to the place it belongs in, resize it, recaption or ' +
-      'recolour it. `move` is [x, y] in ORIGINAL pixels, read off the labelled grid lines. One call takes ' +
-      'many operations, so a round of corrections is one call. The picture comes back around what you ' +
-      'changed, with the record. The radius is r, in original pixels. To take a wrong mark out, use ' +
-      'vision_unmark — as soon as it is wrong, not at the end.',
+      'recolour it. `move` is [x, y] in ORIGINAL pixels, read off the labelled grid; `r` is the radius ' +
+      'in those pixels. One call takes many operations, so a round of corrections is one call. The answer ' +
+      'is a square window around what you changed, with the record — read it, because a correction is done ' +
+      'only when it is seen to be right. To take a wrong mark out, use `mark_remove`.',
     parameters: {
       type: 'object',
       additionalProperties: false,

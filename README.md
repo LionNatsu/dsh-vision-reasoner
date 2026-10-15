@@ -11,10 +11,12 @@ similar regions a note meant is another.
 
 | Tool | Purpose |
 |---|---|
-| `vision_look` | Look at what the camera is pointed at. `regions` is one to nine rectangles in original pixels: one points the camera there, several come back as one sheet of labelled tiles. `zoom`, `move` and `reset` aim the camera, which stays where it is left, so looking again needs no arguments. The picture is drawn without the marks unless they are asked for. |
-| `vision_mark` | Mark places by their coordinates, `at: [x, y]` in original pixels, with a radius, a caption and a colour. |
-| `vision_unmark` | Delete marks by number, e.g. `[3, 7]`, when a mark is in the wrong place. |
-| `vision_edit` | Move, resize, recaption or recolour marks by number, in one call. |
+| `camera_reset` | Point the camera at the whole picture — one square window holding all of it, the picture drawn inside and the rest black — and see it. |
+| `camera_move` | `step: "next"` walks the sweep in reading order, `"previous"` steps back, a direction steps one whole window, and `to: [x, y]` centres the window on a place read off the grid. |
+| `camera_zoom_in` / `camera_zoom_out` | One ×2 or ÷2 step each, about the centre, `times` for several at once. The camera stays where it is left. |
+| `mark_add` | Mark places by their coordinates, `at: [x, y]` in original pixels, with a radius `r`, a caption and a colour. The camera moves to the batch and the answer is a window around it. |
+| `mark_remove` | Delete marks by number, e.g. `[3, 7]`, when a mark is in the wrong place. |
+| `mark_edit` | Move, resize, recaption or recolour marks by number, in one call. |
 
 Every picture comes back with a grid whose lines sit at round positions in the
 picture's own pixels — 100, 200, 500, depending on how closely it is being looked
@@ -25,9 +27,9 @@ visible in the next answer rather than several calls later. The tools never coun
 or judge what is in a picture: that is the model's statement to make.
 
 The package also publishes a skill, `vision-sweep-count`: the workflow this tool set was
-built around — look, sweep in rectangles, mark as you read, finish each rectangle with
-and the `looked:` line. A model reads a skill when a task matches one, which matters here because
-pointing inside reasoning is a mode a model does not enter on its own.
+built around — see the whole picture, sweep it window by window, mark as you read, read the
+window that comes back, count the record. A model reads a skill when a task matches one, which
+matters here because pointing inside reasoning is a mode a model does not enter on its own.
 
 ## Install
 
@@ -56,19 +58,20 @@ locale files are this package's own. Node `^22.19.0 || >=24.0.0`.
    position is read by naming the line before a feature and estimating the gap —
    about a quarter of a step is as fine as the eye goes, which is why the grid steps
    finer as the view gets closer.
-3. **Mark the coordinates.** `vision_mark` takes `at: [x, y]`, a size the caller
-   judges by eye (`s`, `m`, `l`), a caption and a colour. The picture comes back
-   drawn around what was just marked, with the ring on it and the record beside it.
-4. **Sweep, then aim instead of slicing.** `regions` takes one to nine rectangles:
-   several return one sheet, each tile labelled with the rectangle it came from and
-   carrying its own grid. From there the camera moves — `zoom`, `move`, `reset` — so a
-   crowded scene is counted in a handful of calls instead of twenty separate looks.
-5. **Check, then correct.** A look with `marks: true` shows what is already marked, and
-   the `looked:` line lists every rectangle you have been through with the marks inside
-   each; a rectangle with none is either finished or forgotten. `vision_edit` moves a
-   mark that is nearly right and `vision_unmark` deletes one that is not — at once, since
-   a change comes back drawn around what it touched and a wrong ring misleads every look
-   after it.
+3. **Mark the coordinates.** `mark_add` takes `at: [x, y]`, a radius `r` in the
+   picture's own pixels, a caption and a colour. The camera moves to what was marked
+   and the answer is a square window around those marks, with a cross at each centre
+   and the record beside it.
+4. **Sweep in windows you keep.** `camera_zoom_in` until a face is big enough to read,
+   then walk the picture with `camera_move` and `step: "next"`: the windows tile the
+   picture from its centre, "next" goes left to right and then down, and every result
+   says how far the sweep has got and which windows are left. A place read in a window
+   already used is comparable with the last one.
+5. **Check, then correct.** The marks are drawn in every view, so what is left unmarked
+   in the window in front of you is what you have not dealt with, and the record beside
+   it shows a number twice or a ring on nothing. `mark_edit` moves a mark that is nearly
+   right and `mark_remove` deletes one that is not — at once, since a change comes back
+   as a window around what it touched and a wrong ring misleads every view after it.
 
 ## Behaviour
 
@@ -112,21 +115,21 @@ withholding a picture over a failed lookup costs more than it protects.
   `move` aim it, `reset` points it back at the whole picture, and every result says where it is —
   so a caller reads "closer, a little left" rather than inventing rectangles, and looking again
   needs no arguments at all.
-- Marks are drawn only when asked for, so what is being read is the picture.
-- Every result lists the rectangles the picture has been looked at in, newest first, with how
-  many marks are inside each, and names the ones left empty. A caller cannot see its own
-  coverage, and a rectangle it went through and forgot is where a missing row comes from.
-- The view line says how the drawing relates to the picture — `drawn 1400x986 (0.54x of the
-  picture)` — because a caller that reads the rendering as the picture itself is wrong by
-  exactly that ratio. One session reported reading a "1540x1084 preview" while every number
-  it had was in a 2600-pixel space.
-- A sheet is the only way to put several places in one picture, because pictures
-  received separately cannot be compared. Its cells take the shape of the tiles they
-  hold, so a row of wide tiles is not padded into squares, and it holds at most nine
-  tiles so the sheet is not downscaled on its way out.
-- The `looked:` line is the check that needs no picture: it lists every rectangle the camera
-  has been through with the number of marks inside, so what is unmarked shows up as a zero
-  rather than as something the caller has to notice.
+- Marks are drawn by default, so the picture carries the record; `marks: false` gives a clean
+  canvas for counting a place again from scratch.
+- Every result counts the windows the camera has **stopped in** since the last reset, names the
+  one it is in, and names the ones still left: an unswept corner is a word in the answer rather
+  than something a caller has to keep in its head.
+- The window line says how the drawing relates to the picture — `drawn 1400x1400 (1.08x of the
+  picture)` — because a caller that reads the rendering as the picture itself is wrong by exactly
+  that ratio. One session reported reading a "1540x1084 preview" while every number it had was
+  in a 2600-pixel space, and concluded the mapping was ambiguous.
+- Every view is the same shape: a 1400x1400 square. The picture is placed inside it at the scale
+  that fits and whatever is left over is black, so no view can come back as a strip one face
+  tall, and no two views are shaped differently from each other.
+- The grid is always drawn: both axes are labelled along all four edges, the columns that run
+  down and the rows that run across in different colours, and a row label keeps out of the band
+  where the column labels write so a corner is not a fight between two numbers.
 - A view's longest side is capped at 4096 pixels (`MAX_VIEW_DIMENSION`).
 
 ## Limitations
