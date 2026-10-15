@@ -80,7 +80,7 @@ back in the list beside each picture.
 
 The record is a fold of the session log, and nothing else is stored:
 
-- a `tool/call` for `vision_mark` / `vision_unmark` / `vision_edit` is a pending
+- a `tool/call` for a mark tool — `mark_add` / `mark_remove` / `mark_edit` — is a pending
   mutation;
 - its `tool/result` with no `error` commits it, a failed one drops it;
 - a `turn/end` drops anything still pending.
