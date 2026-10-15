@@ -482,9 +482,11 @@ export function apply(ctx) {
       'marks you have placed are what you read instead of remembering, and a batch typed at the end is ' +
       'where doubles and misses come from. LOOK FIRST — mark what you can see in a picture you have ' +
       'looked at with vision_look; never a position worked out from anywhere else. `at` is [x, y] in ' +
-      'the picture\'s own pixels, read off the labelled lines. The picture comes back around what you ' +
-      'just marked — one tile per mark when they are spread across it — and every result lists the ' +
-      'whole record, so a ring that missed its face, a double or a wrong one shows at once. A mark ' +
+      'the picture\'s own pixels, read off the labelled lines. Two or three at a time is the useful ' +
+      'size: the picture then comes back around them, with a cross at each centre, and a place read ' +
+      'from a close view is good to a few pixels where one read from the whole picture is good to tens. ' +
+      'Spread them further and it comes back one tile per mark instead. Every result lists the whole ' +
+      'record, so a ring that missed its face, a double or a wrong one shows at once. A mark ' +
       'that is nearly right is moved by vision_edit, a wrong one is deleted by vision_unmark, and ' +
       'cover shows what is still unmarked. Nothing here counts or judges what the picture holds — ' +
       'that is your statement to make.',
