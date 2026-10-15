@@ -19,8 +19,8 @@ import { cameraOps, resolveCamera } from '../lib/camera.js'
 import { coordGridOverlay } from '../lib/draw.js'
 import { MAX_SHEET_PIXELS, VIEW_TARGET, clampRegion, sheetLayout, viewOf } from '../lib/render.js'
 import {
-  SIZES, askedRegionText, frameRegion, gridLines, gridStep, placeAt, radiusFor, regionAround, regionOf,
-  regionText
+  DEFAULT_RADIUS, askedRegionText, frameRegion, gridLines, gridStep, placeAt, radiusFor, regionAround,
+  regionOf, regionText
 } from '../lib/views.js'
 
 const frame = () => frameRegion(1200, 800)
@@ -73,17 +73,12 @@ test('a region is four numbers, trimmed to the picture, either way round', () =>
   assert.throws(() => regionOf(['a', 2, 3, 4], 1200, 800), /region must be four numbers/)
 })
 
-test('a size is a ring in pixels, the same whatever is being looked at', () => {
-  assert.deepEqual(SIZES, { s: 30, m: 60, l: 120 })
-  assert.equal(radiusFor('s'), 30)
+test('a ring is a radius in pixels, and one way to say it', () => {
+  assert.equal(DEFAULT_RADIUS, 30)
   assert.equal(radiusFor(undefined), 30, 'a caller that says nothing gets the crowd size')
-  assert.throws(() => radiusFor('xl'), /size must be one of s, m, l/)
-  // A number is the honest form: the ring is a size in the picture, so changing how
-  // closely the caller is looking does not change the ring it already placed.
-  assert.equal(radiusFor(undefined, 47), 47)
-  assert.equal(radiusFor('s', 200), 200, 'a number wins over a preset')
-  assert.equal(radiusFor(undefined, 3.4), 4, 'and is at least a few pixels across')
-  assert.throws(() => radiusFor(undefined, 'wide'), /r must be a number of picture pixels/)
+  assert.equal(radiusFor(47), 47)
+  assert.equal(radiusFor(3.4), 4, 'and a ring is at least a few pixels across')
+  assert.throws(() => radiusFor('wide'), /r must be a number of picture pixels/)
 })
 
 test('a radius given in pixels survives a replay', () => {
@@ -122,13 +117,13 @@ test('the rectangle around places has room for what is next to them', () => {
 
 test('a mark is a ring at the coordinates it was given', () => {
   const marked = applyToolArgs(emptyRecord('a.png'), 'vision_mark',
-    { image: 'a.png', marks: [{ at: [1200, 640], size: 'm', caption: 'one' }] })
+    { image: 'a.png', marks: [{ at: [1200, 640], r: 60, caption: 'one' }] })
   assert.equal(marked.marks.length, 1)
   assert.deepEqual(markPoint(marked.marks[0]), [1200, 640], 'the place is the place, to the pixel')
   assert.deepEqual(markRect(marked.marks[0]), [1140, 580, 1260, 700], 'and the ring is the size it was told')
   assert.deepEqual(applyToolArgs(marked, 'vision_edit', { image: 'a.png', ops: [{ id: 1, move: [40, 500] }] })
     .marks.map(markPoint), [[40, 500]])
-  assert.deepEqual(applyToolArgs(marked, 'vision_edit', { image: 'a.png', ops: [{ id: 1, size: 'l' }] })
+  assert.deepEqual(applyToolArgs(marked, 'vision_edit', { image: 'a.png', ops: [{ id: 1, r: 120 }] })
     .marks.map(markRect), [[1080, 520, 1320, 760]])
   assert.equal(applyToolArgs(marked, 'vision_unmark', { image: 'a.png', marks: [1] }).marks.length, 0)
 })
@@ -160,7 +155,7 @@ test('looking closer draws the rectangle it was asked for, at the frame\'s own s
   const src = await source()
   const looked = await planLook({
     record: emptyRecord('a.png'),
-    args: { image: 'a.png', region: [300, 200, 600, 400] },
+    args: { image: 'a.png', regions: [[300, 200, 600, 400]] },
     loadSource: loadSource(src)
   })
   assert.equal(looked.result.region, '300,200,600,400')
@@ -213,7 +208,7 @@ test('several rectangles come back as one sheet, each labelled with where it cam
     loadSource: loadSource(src)
   })
   assert.equal(swept.views.length, 1, 'one picture, not one per rectangle')
-  assert.equal(swept.views[0].kind, 'compare')
+  assert.equal(swept.views[0].kind, 'sheet')
   assert.equal(swept.views[0].name, 'sheet-3-a.png')
   assert.match(swept.views[0].label, /#1 0,0,600,400, #2 600,0,1200,400, #3 0,400,1200,800/)
   // Three tiles, so two columns; and the cells take the tiles' own shape — about
@@ -244,26 +239,15 @@ test('a sheet is never bigger than the pipeline will carry', () => {
   }
 })
 
-test('a comparison sheet puts the marks side by side', async () => {
-  const src = await source()
-  const record = applyToolArgs(emptyRecord('a.png'), 'vision_mark',
-    { image: 'a.png', marks: [{ at: [300, 300], caption: 'left' }, { at: [900, 500], caption: 'right' }] })
-  const compared = await planLook({
-    record,
-    args: { image: 'a.png', compare: [1, 2] },
-    loadSource: loadSource(src)
-  })
-  assert.equal(compared.views.length, 1, 'one sheet of tiles, not one picture per mark')
-  assert.equal(compared.views[0].kind, 'compare')
-  assert.match(compared.views[0].label, /#1 left, #2 right/)
-})
-
 test('the camera is aimed by the arguments, and resolved in the picture', () => {
   assert.deepEqual(cameraOps({ zoom: 'in' }), [{ op: 'zoom', by: 2 }])
   assert.deepEqual(cameraOps({ zoom: 'out' }), [{ op: 'zoom', by: 0.5 }])
   assert.deepEqual(cameraOps({ zoom: '3' }), [{ op: 'zoom', by: 3 }])
   assert.deepEqual(cameraOps({ move: [10.4, -20.6] }), [{ op: 'move', by: [10, -21] }])
-  assert.equal(cameraOps({ regions: [[0, 0, 10, 10]] })[0].op, 'reset', 'a sweep starts from the whole picture')
+  assert.deepEqual(cameraOps({ regions: [[0, 0, 10, 10]] })[0], { op: 'region', at: '0,0,10,10' },
+    'one rectangle points the camera there')
+  assert.equal(cameraOps({ regions: [[0, 0, 10, 10], [10, 0, 20, 10]] })[0].op, 'reset',
+    'and several are a sweep, which starts from the whole picture')
   assert.deepEqual(cameraOps({}), [], 'a plain look aims nothing and stays where it is')
   assert.throws(() => cameraOps({ zoom: 'closer' }), /zoom must be "in", "out" or a factor/)
   assert.throws(() => cameraOps({ move: [1] }), /move must be \[dx, dy\] in original pixels/)
@@ -296,9 +280,6 @@ test('a look shows what the camera is pointed at', async () => {
 
   const moved = await planLook({ record, args: { image: 'a.png', move: [-300, -200] }, loadSource: load })
   assert.equal(moved.result.region, '300,200,1500,1000')
-
-  const covered = await planLook({ record, args: { image: 'a.png', cover: 'green' }, loadSource: load })
-  assert.equal(covered.result.region, '600,400,1800,1200', 'covering needs no rectangle: it covers what is seen')
 
   const back = await planLook({ record, args: { image: 'a.png', reset: true }, loadSource: load })
   assert.equal(back.result.region, '0,0,2400,1600')
@@ -358,7 +339,7 @@ test('the text says how the picture on screen relates to the picture', () => {
     ...base,
     region: '0,0,2600,1831',
     step: 0,
-    views: [{ kind: 'compare', name: 'sheet-2-a.png', label: '#1 0,0,900,450', width: 1900, height: 900 }]
+    views: [{ kind: 'sheet', name: 'sheet-2-a.png', label: '#1 0,0,900,450', width: 1900, height: 900 }]
   })
   assert.match(sheet, /drawn 1900x900 as a sheet of tiles/)
   assert.match(sheet, /each tile carries its own grid/, 'no tile is drawn without a grid')

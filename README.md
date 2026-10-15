@@ -11,8 +11,8 @@ similar regions a note meant is another.
 
 | Tool | Purpose |
 |---|---|
-| `vision_look` | Look at what the camera is pointed at: the whole picture, a rectangle of it given as `[x0, y0, x1, y1]` in original pixels, or up to nine rectangles at once, which come back as one sheet of labelled tiles. `zoom`, `move` and `reset` aim the camera, which stays where it is left. Compare marks side by side; paint a colour out. The picture is drawn without the marks unless they are asked for. |
-| `vision_mark` | Mark places by their coordinates, `at: [x, y]` in original pixels, with a size, a caption and a colour. |
+| `vision_look` | Look at what the camera is pointed at. `regions` is one to nine rectangles in original pixels: one points the camera there, several come back as one sheet of labelled tiles. `zoom`, `move` and `reset` aim the camera, which stays where it is left, so looking again needs no arguments. The picture is drawn without the marks unless they are asked for. |
+| `vision_mark` | Mark places by their coordinates, `at: [x, y]` in original pixels, with a radius, a caption and a colour. |
 | `vision_unmark` | Delete marks by number, e.g. `[3, 7]`, when a mark is in the wrong place. |
 | `vision_edit` | Move, resize, recaption or recolour marks by number, in one call. |
 
@@ -26,7 +26,7 @@ or judge what is in a picture: that is the model's statement to make.
 
 The package also publishes a skill, `vision-sweep-count`: the workflow this tool set was
 built around — look, sweep in rectangles, mark as you read, finish each rectangle with
-`cover`. A model reads a skill when a task matches one, which matters here because
+and the `looked:` line. A model reads a skill when a task matches one, which matters here because
 pointing inside reasoning is a mode a model does not enter on its own.
 
 ## Install
@@ -59,25 +59,24 @@ locale files are this package's own. Node `^22.19.0 || >=24.0.0`.
 3. **Mark the coordinates.** `vision_mark` takes `at: [x, y]`, a size the caller
    judges by eye (`s`, `m`, `l`), a caption and a colour. The picture comes back
    drawn around what was just marked, with the ring on it and the record beside it.
-4. **Sweep, then finish a tile at a time.** `regions` takes up to nine rectangles
-   and returns one sheet, each tile labelled with the rectangle it came from and
-   carrying its own grid. Reading a tile, marking what is in it, then `cover`ing that
-   same rectangle is how a crowded scene is counted in a handful of calls instead of
-   twenty separate looks.
-5. **Check, then correct.** `cover` paints the marked colours out, so whatever still
-   shows has not been marked; `compare` puts marks side by side when two places are
-   too close to tell apart; `vision_edit` moves a mark that is nearly right and
-   `vision_unmark` deletes one that is not. A change comes back drawn around what it
-   touched — one tile per mark when those are spread across the picture — so a ring
-   that missed its face is visible in the answer that placed it.
+4. **Sweep, then aim instead of slicing.** `regions` takes one to nine rectangles:
+   several return one sheet, each tile labelled with the rectangle it came from and
+   carrying its own grid. From there the camera moves — `zoom`, `move`, `reset` — so a
+   crowded scene is counted in a handful of calls instead of twenty separate looks.
+5. **Check, then correct.** A look with `marks: true` shows what is already marked, and
+   the `looked:` line lists every rectangle you have been through with the marks inside
+   each; a rectangle with none is either finished or forgotten. `vision_edit` moves a
+   mark that is nearly right and `vision_unmark` deletes one that is not — at once, since
+   a change comes back drawn around what it touched and a wrong ring misleads every look
+   after it.
 
 ## Behaviour
 
 **The record is not written to disk.** Marks live in the session log. The harness
 logs every tool call with its arguments and its result, and the record is a fold of
 those events, rebuilt with the same pure functions the live call used. A call
-carries everything the fold needs — a place is a pair of pixels and a size is a
-number of pixels, with no picture to measure — so a reopened session recovers the
+carries everything the fold needs — a place is a pair of pixels, a radius is a number
+of pixels, and the camera is a list of ways it was aimed — so a reopened session recovers the
 same record, and nothing appears beside your picture.
 
 **Each picture is written twice.** The model receives an image block through the
@@ -125,8 +124,9 @@ withholding a picture over a failed lookup costs more than it protects.
   received separately cannot be compared. Its cells take the shape of the tiles they
   hold, so a row of wide tiles is not padded into squares, and it holds at most nine
   tiles so the sheet is not downscaled on its way out.
-- `cover` paints the given colours out: whatever still shows has not been marked.
-  It checks the record, not the perception that produced it.
+- The `looked:` line is the check that needs no picture: it lists every rectangle the camera
+  has been through with the number of marks inside, so what is unmarked shows up as a zero
+  rather than as something the caller has to notice.
 - A view's longest side is capped at 4096 pixels (`MAX_VIEW_DIMENSION`).
 
 ## Limitations
@@ -149,7 +149,8 @@ withholding a picture over a failed lookup costs more than it protects.
   place them.
 - **Native presentation only.** Under code execution (PTC) the calls are not logged
   as `tool/call`, so the fold does not see them.
-- **Checking is cheap, not automatic.** Nothing forces a second look or a `cover`.
+- **Checking is cheap, not automatic.** Nothing forces a second look, and the ledger only
+  reports where the camera has been: it says nothing about what a rectangle holds.
 
 ## Development
 
@@ -159,7 +160,7 @@ node test/tools.test.mjs      # the Host half against a stand-in harness
 ```
 
 The first checks the geometry (the grid steps in round pixels, a place is refused
-outside the picture, a size is a ring in pixels), renders real PNGs, and drives
+outside the picture, a ring is a radius in pixels), renders real PNGs, and drives
 every planning function. The second drives all four tools against a fake session and
 filesystem: it checks that every returned value satisfies its declared output
 schema, that a place is named in the picture's own pixels, and that the record is a

@@ -36,9 +36,9 @@ of how closely the picture is being looked at.
 - Every view is rendered at the same longest side (`VIEW_TARGET`), so a rectangle of
   the picture is never coarser than the whole picture, and a small one is magnified
   until `MAX_CLOSE_SCALE`.
-- A ring size is a number of original pixels (`s` 30, `m` 60, `l` 120 radius), not a
-  fraction of the view: a size that depended on the view would make a replayed call
-  depend on what the caller happened to be looking at.
+- A ring radius is a number of original pixels (30 unless the caller says otherwise), not a
+  fraction of the view: a radius that depended on the view would change the ring a caller had
+  already placed.
 - `MAX_VIEW_DIMENSION` caps every view, sheets included.
 - Line widths have a floor of 2-3 pixels and scale with the view: the attachment
   pipeline re-encodes a view, and hairlines do not survive it.
@@ -58,8 +58,7 @@ the whole picture, and a `region` names the place outright. It is a fold of thos
 the arguments — as replayable as a mark, and carried across a restart — while *resolving* it into a
 rectangle needs the picture's dimensions, so that happens where the picture is at hand. A view
 never leaves the picture and never gets smaller than a twelfth of its longer side, below which
-there is nothing left to read. A `cover` with no rectangle covers what the camera sees, which is
-what makes "finish this part" one word.
+there is nothing left to read.
 
 ## The record
 ## The record
@@ -139,7 +138,7 @@ fit under the attachment pipeline's downscale threshold, and a tenth would buy a
 smaller picture rather than a bigger one. Sheet cells follow the tiles' mean aspect
 ratio, because square cells around wide tiles double a sheet's pixels to show the
 same picture. A sweep is the shape a counting task needs: one call for a band of the
-picture, then a `cover` of the same rectangle to find what the band still shows.
+picture, then a `marks: true` look at the same place to find what the band still shows.
 
 Every result carries the same things: the picture's size, the rectangle drawn, how the drawing
 relates to that rectangle (`drawn 1400x986 (0.54x of the picture)`, or `as a sheet of tiles`),
@@ -158,7 +157,7 @@ must not interleave, or two marks would be handed the same number.
 
 `lib/skill.js` publishes one skill, `vision-sweep-count`, through `ctx.get('skills')` when the
 composition has that service: sweep in rectangles, mark as you read, finish each rectangle with
-`cover`, count the record. The tool descriptions are read while deciding whether to call a tool;
+and read the ledger. The tool descriptions are read while deciding whether to call a tool;
 a skill is read when a task matches one, which is the channel that reaches the model before it
 starts. The skill is registered from the calling context's layer, so a profile that mounts this
 package offers it to every session in that profile.

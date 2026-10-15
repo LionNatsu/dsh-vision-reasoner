@@ -66,7 +66,7 @@ const VIEW_VALUE_SCHEMA = {
   additionalProperties: false,
   required: ['kind', 'name', 'width', 'height'],
   properties: {
-    kind: { type: 'string', enum: ['frame', 'crop', 'compare', 'cover'] },
+    kind: { type: 'string', enum: ['frame', 'crop', 'sheet'] },
     name: { type: 'string' },
     label: { type: 'string' },
     width: { type: 'integer' },
@@ -130,11 +130,14 @@ const IMAGE_PARAMETER = {
   description: 'Path to the picture. A relative path resolves against the session working directory.'
 }
 
-const REGION_PARAMETER = {
+const REGIONS_PARAMETER = {
   type: 'array',
-  items: { type: 'integer' },
-  description: 'The rectangle to look at, `[x0, y0, x1, y1]` in original image pixels, read off the labelled ' +
-    'grid lines. Leave it out for the whole picture; give a small one to read a face closely.'
+  items: { type: 'array', items: { type: 'integer' } },
+  description: `One to ${MAX_SHEET_TILES} rectangles, e.g. [[0, 0, 900, 450], [900, 0, 1800, 450]], each ` +
+    '[x0, y0, x1, y1] in original pixels read off the labelled grid lines. One points the camera there; ' +
+    'several come back as one sheet of tiles, each labelled with its rectangle — a whole picture swept ' +
+    'in a few calls. Read a tile, mark what is in it, then look again with `marks: true` to see what ' +
+    'is still unmarked.'
 }
 
 const AT_PARAMETER = {
@@ -144,11 +147,10 @@ const AT_PARAMETER = {
     'labelled lines.'
 }
 
-const SIZE_PARAMETER = {
-  type: 'string',
-  enum: ['s', 'm', 'l'],
-  description: 'How big the ring is drawn, in the picture\'s own pixels: s is 60 px across for one face in a ' +
-    'crowd and is the default, m is 120 px for a person, l is 240 px for a group or a large area.'
+const R_PARAMETER = {
+  type: 'integer',
+  description: 'The ring radius in original pixels, when the ring has to match something you can see: a face ' +
+    'is about 60, a head in a crowd about 30. Default 30.'
 }
 
 const MARK_ITEM_SCHEMA = {
@@ -157,12 +159,7 @@ const MARK_ITEM_SCHEMA = {
   required: ['at'],
   properties: {
     at: AT_PARAMETER,
-    r: {
-      type: 'integer',
-      description: 'The ring radius in original pixels. It overrides size; give it when the ring has to ' +
-        'match something you can see (a face is about 60).'
-    },
-    size: SIZE_PARAMETER,
+    r: R_PARAMETER,
     caption: { type: 'string', description: 'A few words drawn beside the number, e.g. "half hidden".' },
     colour: { type: 'string', enum: COLOUR_NAMES, description: `Its meaning is yours. Default ${DEFAULT_COLOUR}.` }
   }
@@ -175,12 +172,7 @@ const OP_ITEM_SCHEMA = {
   properties: {
     id: { type: 'integer', description: 'The number drawn on the picture.' },
     move: { ...AT_PARAMETER, description: 'Where the mark belongs: `[x, y]` in original image pixels.' },
-    size: SIZE_PARAMETER,
-    r: {
-      type: 'integer',
-      description: 'The ring radius in original pixels. It overrides size; give it when the ring has to ' +
-        'match something you can see (a face is about 60).'
-    },
+    r: R_PARAMETER,
     caption: { type: 'string', description: 'New caption; "" clears it.' },
     colour: { type: 'string', enum: COLOUR_NAMES, description: 'New colour.' }
   }
@@ -448,25 +440,24 @@ export function apply(ctx) {
       'it and every line labelled: a number you read is a number you can use. What arrives is a ' +
       'rendering — the picture comes back at a size this tool chose, not the picture\'s own, so read ' +
       'positions off the labels and never off the pixels of the image in front of you. ' +
-      'Start here — a place is named from what you have seen. `region` is [x0, y0, x1, y1] read off ' +
-      'those labels: leave it out for the whole picture, give a small one to read a face closely, or ' +
-      'give `regions` — several rectangles at once — to sweep a picture in a few calls. The camera ' +
-      'stays where you leave it: every look shows what is in front of the lens, `zoom` and `move` ' +
-      'aim it, `reset` points it back at the whole picture, and every result says where it is. ' +
-      'Read a ' +
-      'position by naming the line beside it and judging the gap by eye — there is no scale to work ' +
+      'Start here — a place is named from what you have seen. `regions` is one to nine rectangles in ' +
+      'those pixels: one points the camera there, several come back as one sheet of labelled tiles, ' +
+      'which is how a whole picture is swept in a few calls. The camera stays where you leave it: every ' +
+      'look shows what is in front of the lens, `zoom` and `move` aim it, `reset` points it back at the ' +
+      'whole picture, and every result says where it is — so looking again needs no arguments. ' +
+      'Read a position by naming the line beside it and judging the gap by eye — there is no scale to work ' +
       'out — and treat this grid as the only ruler: do not crop the picture with another tool, or read ' +
       'a position off another view of it, whose pixels are a different size. The picture is drawn ' +
-      'without your marks unless you ask for `marks: true`; `compare` puts marks side by side to ask "is ' +
-      'this one thing or two"; `cover` paints a colour out, so whatever still shows has not been ' +
-      'marked.',
+      'without your marks unless you ask for `marks: true`, which is how you see what is already ' +
+      'marked; the `looked:` line beside it says which rectangles you have been through and how many ' +
+      'marks are in each.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       required: ['image'],
       properties: {
         image: IMAGE_PARAMETER,
-        region: REGION_PARAMETER,
+        regions: REGIONS_PARAMETER,
         reset: {
           type: 'boolean',
           description: 'Point the camera back at the whole picture.'
@@ -481,29 +472,10 @@ export function apply(ctx) {
           items: { type: 'integer' },
           description: 'Shift the camera by [dx, dy] in original pixels, relative to where it is now.'
         },
-        regions: {
-          type: 'array',
-          items: { type: 'array', items: { type: 'integer' } },
-          description: 'Several rectangles in one call, e.g. [[0, 0, 900, 450], [900, 0, 1800, 450]], at ' +
-            `most ${MAX_SHEET_TILES}: a picture swept in a few calls. They come back as one sheet of ` +
-            'tiles, each labelled with its rectangle and carrying its own grid. Read a tile, mark ' +
-            'what is in it, then cover that rectangle to find what you missed.'
-        },
         marks: {
           type: 'boolean',
           description: 'Draw every mark placed so far (default false: the picture is what is being read). ' +
             'Marks stay from call to call and are drawn at whatever rectangle and scale you look at.'
-        },
-        compare: {
-          type: 'array',
-          items: { type: 'integer' },
-          description: 'Mark numbers to put side by side in one picture, for places too close to tell apart.'
-        },
-        cover: {
-          type: 'string',
-          description: `Paint these marked colours out (${COLOUR_NAMES.join(', ')}, or "all") over the ` +
-            'rectangle you are looking at, or the whole picture; whatever still shows has not been marked. ' +
-            'Covering one rectangle at a time is how a part of a picture is finished.'
         }
       }
     },
@@ -515,13 +487,11 @@ export function apply(ctx) {
     execute: run(planLook),
     presentCall: (args) => ({
       card: 'generic',
-      title: args.compare?.length
-        ? `Compare ${args.compare.map((id) => `#${id}`).join(' ')}`
-        : args.cover !== undefined
-          ? `Cover ${args.cover}`
-          : Array.isArray(args.regions)
-            ? `Look at ${args.regions.length} rectangle(s)`
-            : Array.isArray(args.region) ? `Look at ${args.region.join(',')}` : `Look at ${args.image}`,
+      title: Array.isArray(args.regions)
+        ? `Look at ${args.regions.length} rectangle(s)`
+        : args.reset === true
+          ? 'Look at the whole picture'
+          : `Look at ${args.image}`,
       kind: 'read',
       locations: [{ path: args.image }]
     })
@@ -543,9 +513,8 @@ export function apply(ctx) {
       'size: a place read from a close view is good to a few pixels, where one read from the whole ' +
       'picture is good to tens. ' +
       'Spread them further and it comes back one tile per mark instead. Every result lists the whole ' +
-      'record, so a ring that missed its face, a double or a wrong one shows at once. And cover ' +
-      'shows what is still unmarked. Nothing here counts or judges what the picture holds — ' +
-      'that is your statement to make.',
+      'record, so a ring that missed its face, a double or a wrong one shows at once. Nothing here counts ' +
+      'or judges what the picture holds — that is your statement to make.',
     parameters: {
       type: 'object',
       additionalProperties: false,

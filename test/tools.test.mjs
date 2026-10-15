@@ -206,11 +206,20 @@ test('the surface is four verbs, and a place is named in the picture\'s own pixe
     'the picture arrives as a rendering, and the labels are the only coordinates')
   assert.match(look.description, /no scale to work out/, 'and is told how to read a position')
   assert.match(look.description, /only ruler/, 'and does not read positions off another view')
-  assert.match(look.parameters.properties.region.description, /original image pixels/)
+  assert.match(look.parameters.properties.regions.description, /original pixels/)
   assert.match(look.parameters.properties.marks.description, /Marks stay from call to call/,
     'the picture carries the record, and a look can draw it')
   assert.match(mark.description, /STAYS on the picture/, 'a mark is durable, not a report')
   assert.equal(look.parameters.required.includes('view'), false)
+
+  // The surface is pinned: every parameter is a concept a caller has to learn, so adding
+  // one is a decision rather than a drift. Looking down the list is the inventory.
+  assert.deepEqual(Object.keys(look.parameters.properties).sort(),
+    ['image', 'marks', 'move', 'regions', 'reset', 'zoom'])
+  assert.deepEqual(Object.keys(mark.parameters.properties.marks.items.properties).sort(),
+    ['at', 'caption', 'colour', 'r'])
+  assert.deepEqual(Object.keys(harness.tools.get('vision_edit').parameters.properties.ops.items.properties).sort(),
+    ['caption', 'colour', 'id', 'move', 'r'])
 
   const edit = harness.tools.get('vision_edit')
   assert.match(edit.description, /vision_unmark/, 'deleting is pointed at its own verb')
@@ -241,9 +250,7 @@ test('every tool value satisfies its own declared output schema', async (t) => {
     ['vision_edit', { image: imagePath, ops: [{ id: 1, move: [640, 480], colour: 'yellow' }] }],
     ['vision_unmark', { image: imagePath, marks: [1] }],
     ['vision_look', { image: imagePath, region: [100, 100, 500, 400], marks: true }],
-    ['vision_look', { image: imagePath, compare: [2] }],
     ['vision_look', { image: imagePath, cover: 'green' }],
-    ['vision_look', { image: imagePath, region: [100, 100, 400, 300], cover: 'all' }],
     // A sheet of rectangles: the value carries the same fields as any other look.
     ['vision_look', { image: imagePath, regions: [[0, 0, 400, 300], [400, 0, 800, 300]] }],
     // Aiming the camera is part of looking, and its value carries the same fields.
@@ -378,7 +385,7 @@ test('the picture comes back around what was just marked', async (t) => {
   const far = await call(harness, 'vision_mark',
     { image: imagePath, marks: [{ at: [80, 80] }, { at: [720, 520] }] }, session)
   assert.equal(far.value.region, '0,0,800,600')
-  assert.equal(far.value.views[0].kind, 'compare')
+  assert.equal(far.value.views[0].kind, 'sheet')
   assert.equal(far.value.views[0].name, 'check-2-photo.png')
   assert.equal(far.value.views[0].label, '#1, #2', 'the near call was never committed, so these are the first two')
   assert.ok(far.value.views[0].width > 0 && far.value.views[0].height > 0)
@@ -515,7 +522,7 @@ test('the workflow is published as a skill, for a task that matches it', () => {
   assert.equal(skill.name, 'vision-sweep-count')
   assert.match(skill.whenToUse, /how many/)
   assert.match(skill.description, /sweep it in rectangles/)
-  assert.match(skill.content, /cover: "green"/, 'the check that finds what is unmarked')
+  assert.match(skill.content, /looked:/, 'the check that finds what is unmarked is the ledger')
   assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
 })
 
@@ -533,8 +540,8 @@ test('the arguments the model can send are the only ones accepted', async (t) =>
     /outside the picture, which is 800x600 original pixels/
   )
   await assert.rejects(
-    () => call(harness, 'vision_mark', { image: imagePath, marks: [{ at: [10, 10], size: 'xl' }] }, session),
-    /size must be one of s, m, l/
+    () => call(harness, 'vision_mark', { image: imagePath, marks: [{ at: [10, 10], r: 'wide' }] }, session),
+    /r must be a number of picture pixels/
   )
   await assert.rejects(
     () => call(harness, 'vision_unmark', { image: imagePath, marks: [] }, session),
@@ -549,11 +556,7 @@ test('the arguments the model can send are the only ones accepted', async (t) =>
     /move must be \[x, y\] in original pixels/
   )
   await assert.rejects(
-    () => call(harness, 'vision_look', { image: imagePath, cover: 'chartreuse' }, session),
-    /unknown colour\(s\) chartreuse/
-  )
-  await assert.rejects(
-    () => call(harness, 'vision_look', { image: imagePath, region: ['a', 'b', 'c', 'd'] }, session),
+    () => call(harness, 'vision_look', { image: imagePath, regions: [['a', 'b', 'c', 'd']] }, session),
     /region must be four numbers in original pixels/
   )
 })
