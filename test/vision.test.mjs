@@ -15,6 +15,7 @@ import {
   marksInside
 } from '../lib/record.js'
 import { MAX_SHEET_TILES, describe as describeResult, planLook, planMark, recordLines } from '../lib/core.js'
+import { coordGridOverlay } from '../lib/draw.js'
 import { MAX_SHEET_PIXELS, VIEW_TARGET, clampRegion, sheetLayout, viewOf } from '../lib/render.js'
 import {
   SIZES, askedRegionText, frameRegion, gridLines, gridStep, placeAt, radiusFor, regionAround, regionOf,
@@ -76,6 +77,29 @@ test('a size is a ring in pixels, the same whatever is being looked at', () => {
   assert.equal(radiusFor('s'), 30)
   assert.equal(radiusFor(undefined), 30, 'a caller that says nothing gets the crowd size')
   assert.throws(() => radiusFor('xl'), /size must be one of s, m, l/)
+  // A number is the honest form: the ring is a size in the picture, so changing how
+  // closely the caller is looking does not change the ring it already placed.
+  assert.equal(radiusFor(undefined, 47), 47)
+  assert.equal(radiusFor('s', 200), 200, 'a number wins over a preset')
+  assert.equal(radiusFor(undefined, 3.4), 4, 'and is at least a few pixels across')
+  assert.throws(() => radiusFor(undefined, 'wide'), /r must be a number of picture pixels/)
+})
+
+test('a radius given in pixels survives a replay', () => {
+  const record = applyToolArgs(emptyRecord('a.png'), 'vision_mark',
+    { image: 'a.png', marks: [{ at: [500, 500], r: 47 }] })
+  assert.deepEqual(markRect(record.marks[0]), [453, 453, 547, 547])
+  const resized = applyToolArgs(record, 'vision_edit', { image: 'a.png', ops: [{ id: 1, r: 12 }] })
+  assert.deepEqual(resized.marks.map(markRect), [[488, 488, 512, 512]])
+})
+
+test('the grid is always drawn, and its axes are told apart by colour', () => {
+  const view = viewOf(frame(), VIEW_TARGET)
+  const svg = coordGridOverlay(view, frame())
+  assert.match(svg, /#22d3ee/, 'the columns that run down')
+  assert.match(svg, /#f5b942/, 'the rows that run across')
+  const lines = svg.split('<line').length - 1
+  assert.ok(lines > 10, 'the grid draws its lines: ' + lines)
 })
 
 test('a view is a uniform scale of its rectangle, and a closer rectangle is magnified', () => {
@@ -289,4 +313,5 @@ test('the text says how the picture on screen relates to the picture', () => {
     views: [{ kind: 'compare', name: 'sheet-2-a.png', label: '#1 0,0,900,450', width: 1900, height: 900 }]
   })
   assert.match(sheet, /drawn 1900x900 as a sheet of tiles/)
+  assert.match(sheet, /each tile carries its own grid/, 'no tile is drawn without a grid')
 })

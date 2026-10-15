@@ -157,6 +157,11 @@ const MARK_ITEM_SCHEMA = {
   required: ['at'],
   properties: {
     at: AT_PARAMETER,
+    r: {
+      type: 'integer',
+      description: 'The ring radius in original pixels. It overrides size; give it when the ring has to ' +
+        'match something you can see (a face is about 60).'
+    },
     size: SIZE_PARAMETER,
     caption: { type: 'string', description: 'A few words drawn beside the number, e.g. "half hidden".' },
     colour: { type: 'string', enum: COLOUR_NAMES, description: `Its meaning is yours. Default ${DEFAULT_COLOUR}.` }
@@ -171,6 +176,11 @@ const OP_ITEM_SCHEMA = {
     id: { type: 'integer', description: 'The number drawn on the picture.' },
     move: { ...AT_PARAMETER, description: 'Where the mark belongs: `[x, y]` in original image pixels.' },
     size: SIZE_PARAMETER,
+    r: {
+      type: 'integer',
+      description: 'The ring radius in original pixels. It overrides size; give it when the ring has to ' +
+        'match something you can see (a face is about 60).'
+    },
     caption: { type: 'string', description: 'New caption; "" clears it.' },
     colour: { type: 'string', enum: COLOUR_NAMES, description: 'New colour.' }
   }
@@ -508,13 +518,16 @@ export function apply(ctx) {
       'marks you have placed are what you read instead of remembering, and a batch typed at the end is ' +
       'where doubles and misses come from. LOOK FIRST — mark what you can see in a picture you have ' +
       'looked at with vision_look; never a position worked out from anywhere else. `at` is [x, y] in ' +
-      'the picture\'s own pixels, read off the labelled lines. Two or three at a time is the useful ' +
-      'size: the picture then comes back around them, with a cross at each centre, and a place read ' +
-      'from a close view is good to a few pixels where one read from the whole picture is good to tens. ' +
+      'the picture\'s own pixels, read off the labelled lines. Every mark comes back drawn at once, ' +
+      'with a cross at each centre, around what you just marked: read that picture before you go on. ' +
+      'A ring that is off is moved by vision_edit or deleted by vision_unmark in the same breath — a ' +
+      'wrong ring misleads every later look, and clearing it costs less than reasoning around it. ' +
+      'Two or three at a time is the useful ' +
+      'size: a place read from a close view is good to a few pixels, where one read from the whole ' +
+      'picture is good to tens. ' +
       'Spread them further and it comes back one tile per mark instead. Every result lists the whole ' +
-      'record, so a ring that missed its face, a double or a wrong one shows at once. A mark ' +
-      'that is nearly right is moved by vision_edit, a wrong one is deleted by vision_unmark, and ' +
-      'cover shows what is still unmarked. Nothing here counts or judges what the picture holds — ' +
+      'record, so a ring that missed its face, a double or a wrong one shows at once. And cover ' +
+      'shows what is still unmarked. Nothing here counts or judges what the picture holds — ' +
       'that is your statement to make.',
     parameters: {
       type: 'object',
@@ -587,7 +600,8 @@ export function apply(ctx) {
       'Correct marks that are nearly right: move one to the place it belongs in, resize it, recaption or ' +
       'recolour it. `move` is [x, y] in ORIGINAL pixels, read off the labelled grid lines. One call takes ' +
       'many operations, so a round of corrections is one call. The picture comes back around what you ' +
-      'changed, with the record. To take a wrong mark out, use vision_unmark.',
+      'changed, with the record. The radius is r, in original pixels. To take a wrong mark out, use ' +
+      'vision_unmark — as soon as it is wrong, not at the end.',
     parameters: {
       type: 'object',
       additionalProperties: false,
