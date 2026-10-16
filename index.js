@@ -92,6 +92,11 @@ const PICTURE_RESULT_PROPERTIES = {
     description: 'The grid step in original pixels (0 when the picture carries no grid).'
   },
   marksShown: { type: 'boolean', required: true },
+  aimed: {
+    type: 'string',
+    description: 'The movement this call asked for, empty when it asked for none. Present so the answer ' +
+      'can say when the window had nowhere to move.'
+  },
   sweep: {
     type: 'string',
     required: true,
@@ -144,8 +149,8 @@ const TO_PARAMETER = {
   type: 'array',
   items: { type: 'integer' },
   description: 'Where the window\'s centre goes: `[x, y]` in the picture\'s own pixels, read off the grid. ' +
-    'A place, never an offset to work out, and it may sit near an edge: the part of the window past the ' +
-    'picture is black.'
+    'A place, never an offset to work out. A window as large as the picture has nowhere to move, so it ' +
+    'keeps the picture centred; a smaller one may sit over an edge, and the part past the picture is black.'
 }
 
 const MARKS_PARAMETER = {

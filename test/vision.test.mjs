@@ -117,13 +117,19 @@ test('zoom halves and doubles about the centre, and stops at the picture and at 
   assert.equal(tiny.side, MIN_SIDE, 'never smaller than the smallest thing worth reading')
 })
 
-test('a place puts the window\'s centre there, and a wild place stays over the picture', () => {
+test('a place puts the window\'s centre there, and a window as big as the picture cannot move', () => {
   const here = window_([{ op: 'reset' }, { op: 'zoom', by: 2 }, { op: 'move', at: '700,400' }])
   assert.equal(here.cx, 700)
   assert.equal(here.cy, 400)
+  // While the window holds the whole picture there is nowhere to move: sliding it would cut the
+  // picture off and show black in its place, which is not what "look at this place" can mean.
+  const whole = window_([{ op: 'reset' }])
+  assert.deepEqual(window_([{ op: 'reset' }, { op: 'move', at: '880,700' }]), whole)
+  assert.deepEqual(window_([{ op: 'reset' }, { op: 'move', by: 'right' }]), whole)
+  // A smaller window may sit over an edge, but not leave the picture behind.
   const wild = window_([{ op: 'reset' }, { op: 'zoom', by: 2 }, { op: 'move', at: '-100,5000' }])
-  assert.ok(wild.cx >= 0 && wild.cx <= W && wild.cy >= 0 && wild.cy <= H,
-    'a camera pointed outside the picture would be a view of nothing')
+  assert.ok(wild.x1 > 0 && wild.x0 < W && wild.y1 > 0 && wild.y0 < H,
+    'the picture is still in the window, wherever the caller pointed')
 })
 
 test('the camera is aimed by the arguments, and refuses what it cannot read', () => {
@@ -198,14 +204,16 @@ test('a mark is a ring at the coordinates it was given', () => {
   assert.equal(applyToolArgs(record, 'mark_remove', { image: 'a.png', marks: [1] }).marks.length, 0)
 })
 
-test('marking moves the camera to what was marked, and the fold remembers both', () => {
+test('a mark leaves the camera exactly where it was, and the fold remembers both', () => {
   const empty = emptyRecord('a.png')
-  const one = commitCall(empty, 'mark_add', {
+  const aimed = commitCall(empty, 'camera_zoom_in', { image: 'a.png', times: 2 }).record
+  const one = commitCall(aimed, 'mark_add', {
     image: 'a.png', marks: [{ at: [500, 400], r: 40, caption: 'a' }]
   })
   assert.deepEqual(one.result.marked, [1])
   assert.equal(one.record.marks.length, 1)
-  assert.ok(one.record.camera.length >= 2, 'the camera was sent to the mark')
+  assert.deepEqual(one.record.camera, aimed.camera,
+    'a mark never re-frames the camera: a session lost its sweep to a window sized to the mark')
   const two = commitCall(one.record, 'mark_add', { image: 'a.png', marks: [{ at: [900, 600], r: 40 }] })
   assert.deepEqual(two.result.marked, [2])
   assert.equal(two.record.marks.length, 2)

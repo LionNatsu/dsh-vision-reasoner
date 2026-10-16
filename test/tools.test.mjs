@@ -314,28 +314,38 @@ test('the whole picture is drawn inside the square, and what is outside it is bl
   assert.notDeepEqual(pixel(350, 569), picture, 'the grid is drawn over the picture')
 })
 
-test('a row of marks comes back as a square window around them, not a strip', async (t) => {
+test('a row of marks is drawn in the window the caller chose, and nothing moves under it', async (t) => {
   const { dir, imagePath } = await fixture(t)
   const harness = fakeHarness({ imagePath })
   const session = fakeSession(dir)
-  const marks = [100, 200, 300, 400].map((x, index) => ({ at: [x, 300], r: 20, caption: `m${index + 1}` }))
+  // A working scale first, then a row of marks inside that window. A mark must not re-frame the
+  // camera: a live session lost its sweep to exactly that — it ended up with a 64-pixel window
+  // and a grid of 1189 cells, because a small mark asked for a window sized to the mark.
+  const working = await committedCall(harness, 'camera_zoom_in', { image: imagePath, times: 1 }, session, 'zoom')
+  assert.equal(working.value.side, 400)
+  const window = working.value.window
+  const marks = [230, 280, 330, 380].map((x, index) => ({ at: [x, 250], r: 20, caption: `m${index + 1}` }))
   const result = await committedCall(harness, 'mark_add', { image: imagePath, marks }, session, 'row')
   assert.deepEqual(result.value.marked, [1, 2, 3, 4])
-  assert.equal(result.value.window, '10,60,490,540')
-  assert.equal(result.value.side, 480)
-  assert.equal(result.value.whole, false, 'a window around the marks, not the whole picture')
+  assert.equal(result.value.window, window, 'the window is the one already being looked at')
+  assert.equal(result.value.side, 400, 'and still the size the caller chose')
+  assert.equal(result.value.whole, false)
   const [x0, y0, x1, y1] = result.value.window.split(',').map(Number)
-  assert.equal(x1 - x0, y1 - y0, 'the strip one face tall is what this redesign removed')
-  const spanX = Math.max(...marks.map((mark) => mark.at[0])) - Math.min(...marks.map((mark) => mark.at[0]))
-  assert.ok(x1 - x0 >= spanX * 1.5, 'a side wide enough for the row plus room around it')
+  assert.equal(x1 - x0, y1 - y0, 'square: the strip one face tall is what this redesign removed')
   for (const mark of marks) {
-    // Room around every ring, not just its centre inside the frame: the answer is a view of
-    // the place that changed, with what is next to it whole.
     assert.ok(mark.at[0] - mark.r > x0 && mark.at[0] + mark.r < x1, `the ring at ${mark.at} is inside and whole`)
     assert.ok(mark.at[1] - mark.r > y0 && mark.at[1] + mark.r < y1, `the ring at ${mark.at} is inside and whole`)
   }
   assert.match(describeResult(result.value), /marked #1 #2 #3 #4/)
   assert.equal(result.value.record.length, 4)
+
+  // An edit and a removal leave the camera alone too.
+  const edited = await committedCall(harness, 'mark_edit', {
+    image: imagePath, ops: [{ id: 1, move: [120, 290] }]
+  }, session, 'edit')
+  assert.equal(edited.value.window, window, 'correcting a ring does not move the camera')
+  const removed = await committedCall(harness, 'mark_remove', { image: imagePath, marks: [4] }, session, 'remove')
+  assert.equal(removed.value.window, window, 'and neither does deleting one')
 })
 
 test('the camera walks the sweep, and the text says how far it has got', async (t) => {
