@@ -160,6 +160,16 @@ const MARKS_PARAMETER = {
     'instance.'
 }
 
+/**
+ * Said in every tool that takes or reports a coordinate. Each view is drawn at its own scale, so
+ * the label on the picture in front of the caller is the only ruler there is: the same number is a
+ * different distance in two views, and a position carried over from another view is wrong.
+ */
+const RULER_NOTE =
+  'Every view is drawn at its own scale — the same number is a different distance in one window than ' +
+  'in another — so the labelled grid on the picture in front of you is the only ruler: a number you ' +
+  'read is in the picture\'s own pixels, read off that grid, and never converted from another view.'
+
 const AT_PARAMETER = {
   type: 'array',
   items: { type: 'integer' },
@@ -496,7 +506,7 @@ export function apply(ctx) {
       'the last reset, and which are left. A cell counts as looked at when the camera stopped in it. ' +
       'The window is a square of the picture\'s own pixels and the picture is drawn inside it at ' +
       'the scale that fits; whatever is left over is outside the picture and black. ' +
-      '',
+      RULER_NOTE,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -584,13 +594,14 @@ export function apply(ctx) {
       'it — so the marks you have placed are what you read instead of remembering, and a batch typed at ' +
       'the end is where doubles and misses come from. `at` is [x, y] in the picture\'s own pixels, read ' +
       'off the labelled grid: LOOK FIRST, and mark only what you have seen, never a position worked out ' +
-      'from anywhere else. Two or three at a time is the useful size. The camera moves to what you marked, ' +
-      'and the answer is a square window around those marks with a cross at each centre: read it before ' +
-      'you go on, and fix what is off in the same breath — a wrong ring misleads every later view, and ' +
-      'clearing it costs less than reasoning around it. `r` is the ring\'s radius in original pixels ' +
+      'from anywhere else. Two or three at a time is the useful size. The answer is the window you are ' +
+      'already looking at, with the new marks drawn and a cross at each centre: read it before you go on, ' +
+      'and fix what is off in the same breath — a wrong ring misleads every later view, and clearing it ' +
+      'costs less than reasoning around it. Nothing moves underneath you: a mark never changes where the ' +
+      'camera is, so a sweep in progress stays where it is. `r` is the ring\'s radius in original pixels ' +
       '(default 30; a face is about 60). Every result lists the whole record, so a ring that missed its ' +
       'face, a double or a wrong one shows at once. Nothing here counts or judges what the picture holds — ' +
-      'that is your statement to make.',
+      'that is your statement to make. ' + RULER_NOTE,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -625,7 +636,7 @@ export function apply(ctx) {
     description:
       'Delete marks by number, e.g. [3, 7] — as soon as one is wrong, not at the end: a number left in the ' +
       'record still reads as a place you have already dealt with, and the mistake becomes invisible in the ' +
-      'list. The answer is a window around what was removed, with the record.',
+      'list. The answer is the window you are looking at, with the record.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -662,8 +673,10 @@ export function apply(ctx) {
       'Correct marks that are nearly right: move one to the place it belongs in, resize it, recaption or ' +
       'recolour it. `move` is [x, y] in ORIGINAL pixels, read off the labelled grid; `r` is the radius ' +
       'in those pixels. One call takes many operations, so a round of corrections is one call. The answer ' +
-      'is a square window around what you changed, with the record — read it, because a correction is done ' +
-      'only when it is seen to be right. To take a wrong mark out, use `mark_remove`.',
+      'is the window you are looking at, with what changed drawn on it and the record beside it — read it, ' +
+      'because a correction is done only when it is seen to be right. It does not move the camera either: ' +
+      'correct a ring in the window you read it in. To take a wrong mark out, use `mark_remove`. ' +
+      RULER_NOTE,
     parameters: {
       type: 'object',
       additionalProperties: false,
